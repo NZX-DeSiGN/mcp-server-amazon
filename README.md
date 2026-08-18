@@ -74,9 +74,15 @@ All settings are environment variables, so nothing has to be edited and rebuilt:
 | `BROWSER_REUSE` | `true` | Share one Chrome across tool calls instead of launching one per call |
 | `BROWSER_IDLE_TIMEOUT_MS` | `180000` | Close the shared Chrome after this long without activity (`0` keeps it open) |
 | `BLOCK_ASSETS` | `true` | Skip images, stylesheets, fonts, ads and telemetry while scraping |
+| `HTTP_FIRST` | `true` | Read pages over plain HTTP and only start Chrome if Amazon refuses |
 
 `AMAZON_LOCALE` defaults to `en` because a few scrapers match on page text; both
 English and French wordings are recognised, so `fr` works too.
+
+`HTTP_FIRST` is where most of the speed comes from: the pages being scraped are
+server-rendered, so a plain request returns the same markup Chrome would render,
+without the browser. Chrome still takes over automatically on a captcha or an
+unrecognised page, and the tools that click Amazon's widgets always use it.
 
 The three browser settings only trade speed for isolation: with the defaults a
 search takes ~2s instead of ~4.2s, and an idle server holds no browser at all.

@@ -60,6 +60,18 @@ or the `/-/en/` language segment.
 
 ## Important Implementation Details
 
+### HTTP first
+- Read-only scrapers go through `tryFetchOverHttp()` (`src/http.ts`) and only fall
+  back to Puppeteer when Amazon refuses. The pages are server-rendered, so plain
+  HTTP returns the same markup - profiling showed Chrome was no longer the cost.
+- `fetchAmazonHtml(url, { stopWhen })` can abandon the response mid-stream. Amazon
+  streams these pages progressively, so the search page yields its 20 results in
+  974KB out of 2.4MB.
+- A sign-in redirect raises `AmazonAuthRequiredError` and is NOT retried with the
+  browser: same cookies, same wall, twice the wait. A captcha is retried.
+- The product page is the exception that cannot be cut: its fields only appear
+  ~45% into the stream and getting there already costs ~1.4s.
+
 ### Browser Automation
 - Uses headless Chrome with specific flags to avoid detection
 - Implements user agent spoofing
