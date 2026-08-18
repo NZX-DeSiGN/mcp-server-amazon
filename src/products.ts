@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio'
 import fs from 'fs'
 import puppeteer from 'puppeteer'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
-import { createBrowserAndPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
+import { cleanText, createBrowserAndPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
@@ -117,16 +117,17 @@ async function extractProductDetailsPageData($: cheerio.CheerioAPI, asin: string
   // Extract reviews information
   const reviews: ProductDetails['data']['reviews'] = {}
 
-  const averageRating = $('#averageCustomerReviews span.a-size-small.a-color-base').text().trim()
+  // The rating lives in a container that holds both the desktop and mobile copy,
+  // so the raw text reads "4.2  4.2" - cleanText() drops the duplicate.
+  const averageRating = cleanText($('#averageCustomerReviews span.a-size-small.a-color-base').text())
   if (averageRating) reviews.averageRating = averageRating
 
-  const reviewsCountElement = $('#acrCustomerReviewLink span')
-  const reviewsCount = reviewsCountElement.attr('aria-label')
-  if (reviewsCount)
-    reviews.reviewsCount = reviewsCount
-      .replace(/\s+.*$/g, '')
-      .replace(/,/g, '')
-      .trim()
+  // Amazon dropped the aria-label this used to read; take the visible count
+  // ("1,234 ratings" / "1 234 évaluations") and keep the digits.
+  const reviewsCountText =
+    cleanText($('#acrCustomerReviewText').text()) || $('#acrCustomerReviewLink span').attr('aria-label') || ''
+  const reviewsCountMatch = reviewsCountText.match(/([\d.,\u202f\u00a0\s]*\d)/)
+  if (reviewsCountMatch) reviews.reviewsCount = reviewsCountMatch[1].replace(/[.,\u202f\u00a0\s]/g, '')
 
   // Extract main product image
   const mainImageUrl = $('#main-image-container img.a-dynamic-image').attr('src')
