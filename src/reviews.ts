@@ -1,7 +1,8 @@
 import * as cheerio from 'cheerio'
 import fs from 'fs'
 import puppeteer from 'puppeteer'
-import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
+import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, HTTP_FIRST, amazonUrl } from './config.js'
+import { AmazonHttpBlockedError, fetchAmazonHtml, postAmazonForm } from './http.js'
 import { cleanText, getTimestamp, isLoginPage, navigate, withPage } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
@@ -98,6 +99,9 @@ export async function getProductReviews(asin: string, options: GetProductReviews
   const reviewsUrl = buildReviewsUrl(asin, starFilter, sortBy, verifiedPurchaseOnly)
   console.error(`[INFO][get-product-reviews] Fetching reviews for ${asin} from ${reviewsUrl}`)
 
+  const overHttp = await collectOverHttp(asin, reviewsUrl, { starFilter, sortBy, verifiedPurchaseOnly }, maxReviews)
+  if (overHttp) return overHttp
+
   return await withPage(async page => {
     await navigate(page, reviewsUrl)
 
@@ -169,6 +173,129 @@ async function scrapeProductPageReviews(
       'Not logged in: returned only the reviews Amazon shows publicly on the product page. ' +
       'Star filtering and sorting were not applied. Provide valid Amazon cookies to read the full, filterable reviews list.',
   }
+}
+
+/**
+ * Read the reviews without a browser.
+ *
+ * The reviews page is server-rendered and carries everything the pagination needs - the
+ * CSRF token in #cr-state-object and the first cursor on the "show more" button - so the
+ * whole flow, first page and every following batch, runs over plain HTTP. Roughly twice as
+ * fast as the browser path for the first batches.
+ *
+ * Returns null when Amazon will not serve it (no session, captcha, unknown layout), which
+ * also covers the logged-out case: the caller then goes through the browser, where the
+ * public product-page fallback lives.
+ */
+async function collectOverHttp(
+  asin: string,
+  reviewsUrl: string,
+  query: ReviewsQuery,
+  maxReviews: number
+): Promise<ProductReviewsResult | null> {
+  if (!HTTP_FIRST) return null
+
+  try {
+    const html = await fetchAmazonHtml(reviewsUrl)
+    const $ = cheerio.load(html)
+
+    const reviews = extractReviews($)
+    if (reviews.length === 0) {
+      console.error('[WARN][get-product-reviews] HTTP response held no review, falling back to the browser')
+      return null
+    }
+
+    const csrfToken = readCsrfToken($)
+    let cursor = readCursor($)
+    let calls = 0
+
+    while (reviews.length < maxReviews && cursor?.nextPageToken && csrfToken && calls < MAX_AJAX_REQUESTS) {
+      const reftag = `cm_cr_arp_d_paging_btm_${cursor.pageNumber}`
+      const response = await postAmazonForm(
+        amazonUrl(`/portal/customer-reviews/ajax/reviews/get/ref=${reftag}`),
+        buildAjaxBody(asin, query, cursor, reviews.length, reftag),
+        { 'anti-csrftoken-a2z': csrfToken, referer: reviewsUrl }
+      )
+      calls++
+      if (!response.ok) {
+        console.error(`[WARN][get-product-reviews] Reviews endpoint answered HTTP ${response.status}, keeping what we have`)
+        break
+      }
+
+      reviews.push(...extractReviews(cheerio.load(extractReviewListHtml(response.text))))
+      cursor = readCursorFromPayload(response.text)
+    }
+
+    console.error(`[INFO][get-product-reviews] Extracted ${reviews.length} reviews for ${asin} over HTTP (${calls} extra call(s))`)
+    return {
+      asin,
+      productUrl: amazonUrl(`/gp/product/${asin}`),
+      source: 'reviews-page',
+      summary: extractSummary($),
+      appliedFilters: { ...query, filtersApplied: true },
+      reviews: dedupeReviews(reviews).slice(0, maxReviews),
+    }
+  } catch (error: any) {
+    const reason = error instanceof AmazonHttpBlockedError ? error.message : `HTTP request failed: ${error.message}`
+    console.error(`[WARN][get-product-reviews] ${reason}, falling back to the browser`)
+    return null
+  }
+}
+
+interface ReviewsCursor {
+  nextPageToken: string
+  pageNumber: string
+}
+
+function readCsrfToken($: cheerio.CheerioAPI): string | undefined {
+  const raw = $('#cr-state-object').attr('data-state')
+  if (!raw) return undefined
+  try {
+    return (JSON.parse(raw) as { reviewsCsrfToken?: string }).reviewsCsrfToken
+  } catch {
+    return undefined
+  }
+}
+
+function readCursor($: cheerio.CheerioAPI): ReviewsCursor | null {
+  const raw = $('[data-hook="show-more-button"]').attr('data-reviews-state-param')
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Partial<ReviewsCursor>
+    return parsed.nextPageToken && parsed.pageNumber ? { nextPageToken: parsed.nextPageToken, pageNumber: parsed.pageNumber } : null
+  } catch {
+    return null
+  }
+}
+
+/** Each response carries the next cursor inside the HTML of its own "show more" button */
+function readCursorFromPayload(payload: string): ReviewsCursor | null {
+  const token = payload.match(/&quot;nextPageToken&quot;:&quot;([^&]*)&quot;/)
+  const pageNumber = payload.match(/&quot;pageNumber&quot;:&quot;(\d+)&quot;/)
+  return token?.[1] && pageNumber ? { nextPageToken: token[1], pageNumber: pageNumber[1] } : null
+}
+
+function buildAjaxBody(asin: string, query: ReviewsQuery, cursor: ReviewsCursor, reviewsShown: number, reftag: string): URLSearchParams {
+  return new URLSearchParams({
+    sortBy: query.sortBy === 'recent' ? 'recent' : 'helpful',
+    reviewerType: query.verifiedPurchaseOnly ? 'avp_only_reviews' : 'all_reviews',
+    formatType: '',
+    mediaType: '',
+    filterByStar: query.starFilter,
+    filterByAge: '',
+    pageNumber: cursor.pageNumber,
+    filterByLanguage: '',
+    filterByKeyword: '',
+    nextPageToken: cursor.nextPageToken,
+    shouldAppend: 'true',
+    deviceType: 'desktop',
+    canShowIntHeader: 'true',
+    reviewsShown: String(reviewsShown),
+    reftag,
+    pageSize: String(AJAX_PAGE_SIZE),
+    asin,
+    scope: 'reviewsAjax0',
+  })
 }
 
 interface ReviewsQuery {
