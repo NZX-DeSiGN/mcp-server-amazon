@@ -87,9 +87,27 @@ export async function downloadImageAsBase64(url: string): Promise<string> {
   return `${b64}`
 }
 
+/**
+ * Detect Amazon's sign-in wall.
+ *
+ * Amazon does not always render the classic `#ap_email` / `#signInSubmit` form: pages that
+ * require a session (orders, the full reviews list) redirect to `/ap/signin?openid...`,
+ * which serves a "Sign-In" portal page without those selectors. Checking the URL first is
+ * what makes this reliable - matching on the form alone silently parses an empty page.
+ */
+export async function isLoginPage(page: puppeteer.Page): Promise<boolean> {
+  const url = page.url()
+  if (/\/ap\/signin|\/ap\/cvf\/|\/errors\/validateCaptcha/.test(url)) return true
+  if ((await page.$('#ap_email')) !== null || (await page.$('#ap_email_login')) !== null) return true
+  if ((await page.$('#signInSubmit')) !== null || (await page.$('form[name="signIn"]')) !== null) return true
+  return false
+}
+
 export async function throwIfNotLoggedIn(page: puppeteer.Page): Promise<void> {
-  const isLoginPage = (await page.$('#ap_email')) !== null || (await page.$('#signInSubmit')) !== null
-  if (isLoginPage) {
-    throw new Error('You need to be logged in to access this feature. Please log in to Amazon first and then try again.')
+  if (await isLoginPage(page)) {
+    throw new Error(
+      'You need to be logged in to access this feature. Amazon redirected to its sign-in page - ' +
+        'your amazonCookies.json is missing or its session has expired. Log in to Amazon again and re-export your cookies.'
+    )
   }
 }
