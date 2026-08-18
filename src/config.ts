@@ -39,6 +39,13 @@ export const REUSE_BROWSER = envFlag('BROWSER_REUSE', true)
 export const BROWSER_IDLE_TIMEOUT_MS = envInt('BROWSER_IDLE_TIMEOUT_MS', 3 * 60 * 1000)
 
 /**
+ * Read pages over plain HTTP instead of driving Chrome when nothing has to be clicked
+ * - env: HTTP_FIRST
+ * Chrome is still used automatically whenever Amazon refuses to serve a plain request.
+ */
+export const HTTP_FIRST = envFlag('HTTP_FIRST', true)
+
+/**
  * Drop the requests a scraper never reads - images, stylesheets, fonts, media, ad and
  * telemetry hosts - env: BLOCK_ASSETS
  * Disabled automatically for the flows that click Amazon's widgets, which need a page
