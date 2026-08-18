@@ -69,7 +69,7 @@ function extractOrdersHistoryPageData($: cheerio.CheerioAPI, $card: cheerio.Chee
   const orderDate = $card.find('.order-header__header-list-item').first().find('.a-size-base').text().trim()
   const total = $card.find('.order-header__header-list-item').eq(1).find('.a-size-base').text().trim()
   const status = $card.find('.delivery-box__primary-text').text().trim()
-  const collectionMatch = status.match(/Collected on (.+)/)
+  const collectionMatch = status.match(/(?:Collected on|Récupéré le) (.+)/i)
   const collectionDate = collectionMatch ? collectionMatch[1] : null
 
   // Extract delivery address
@@ -101,9 +101,9 @@ function extractOrdersHistoryPageData($: cheerio.CheerioAPI, $card: cheerio.Chee
 
     let returnEligible = false
     let returnDate = null
-    if (returnText.includes('Return or Replace Items')) {
+    if (/Return or Replace Items|Retourner ou remplacer/i.test(returnText)) {
       returnEligible = true
-      const returnDateMatch = returnText.match(/until (.+)/)
+      const returnDateMatch = returnText.match(/(?:until|jusqu'au) (.+)/i)
       returnDate = returnDateMatch ? returnDateMatch[1] : null
     }
 

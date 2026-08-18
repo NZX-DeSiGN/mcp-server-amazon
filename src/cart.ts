@@ -80,9 +80,10 @@ export async function getCartContent(): Promise<CartContent> {
 function extractCartPageData($: cheerio.CheerioAPI): CartContent {
   const $cartContainer = $('#sc-active-cart')
 
-  // Check if cart is empty
+  // Check if cart is empty - wording depends on AMAZON_LOCALE and on the marketplace
+  // ("Cart" on amazon.com, "Basket" on amazon.co.uk, "Panier" on amazon.fr)
   const emptyCartText = $cartContainer.text()
-  if (emptyCartText.includes('Your Amazon Cart is empty')) {
+  if (/Your Amazon (Cart|Basket) is empty|Votre panier Amazon est vide/i.test(emptyCartText)) {
     return {
       isEmpty: true,
       items: [],
@@ -130,7 +131,7 @@ function extractCartPageData($: cheerio.CheerioAPI): CartContent {
     $cartContainer.find('.sc-subtotal .sc-price').text().trim()
 
   const totalItemsText = $cartContainer.find('#sc-subtotal-label-activecart').text().trim()
-  const totalItemsMatch = totalItemsText.match(/\((\d+)\s+item/)
+  const totalItemsMatch = totalItemsText.match(/\((\d+)\s+(?:item|article)/i)
   const totalItems = totalItemsMatch ? parseInt(totalItemsMatch[1]) : items.length
 
   return {
@@ -167,7 +168,8 @@ export async function addToCart(asin: string): Promise<{ success: boolean; messa
 
     try {
       // Check for subscribe and save option using XPath
-      const xpath = "//div[contains(@class, 'accordion-caption')]//span[contains(text(), 'One-time purchase')]"
+      const xpath =
+        "//div[contains(@class, 'accordion-caption')]//span[contains(text(), 'One-time purchase') or contains(text(), 'Achat unique')]"
       const element = await page.waitForSelector(`::-p-xpath(${xpath})`, { timeout: 2000 })
       if (element) {
         console.error(`[INFO][add-to-cart] The item is a subscribe and save product, clicking the one-time purchase option`)
@@ -206,7 +208,7 @@ export async function addToCart(asin: string): Promise<{ success: boolean; messa
       // Check for success message
       const confirmationText = await page.$eval('#sw-atc-confirmation', el => el.textContent || '')
 
-      if (!confirmationText.includes('Added to cart') && !confirmationText.includes('Added to basket')) {
+      if (!/Added to (cart|basket)|Ajouté au panier/i.test(confirmationText)) {
         throw new Error(`Unexpected confirmation message: ${confirmationText}`)
       }
 
