@@ -60,6 +60,11 @@ or the `/-/en/` language segment.
 
 ## Important Implementation Details
 
+### Agent instructions
+- `INSTRUCTIONS` in `src/index.ts` is sent via MCP `instructions` and tells the model
+  how the tools combine (the tool descriptions only say what each one does). Keep the
+  recommendation workflow and the cart/purchase cautions in sync with the tools.
+
 ### Batch inputs
 - `search-products`, `get-product-details` and `get-product-reviews` accept a value
   or an array (`oneOrMany()` in `src/index.ts`). A single value must keep returning

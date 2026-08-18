@@ -42,6 +42,28 @@ Build the project
 npm run build
 ```
 
+## Search filters
+
+`search-products` takes the user criteria as filters rather than as free text, so
+Amazon applies them to its whole catalogue:
+
+```jsonc
+{ "searchTerm": "clavier mécanique", "minPrice": 60, "maxPrice": 150,
+  "minRating": 4, "brand": "Keychron", "category": "computers",
+  "sortBy": "rating", "maxResults": 5 }
+```
+
+`minRating` is applied to the results rather than through Amazon's rating
+refinement, whose id differs per marketplace; the search reads a wider margin of
+results to compensate.
+
+## Agent instructions
+
+The server ships MCP `instructions`, surfaced to the model with the tool list. They
+describe the sequence for a recommendation - filter the search, shortlist, batch the
+detail lookups, read critical *and* positive reviews, compare on what reviewers
+report - plus the cautions around the cart tools and the mocked purchase.
+
 ## Batch lookups
 
 The three lookup tools take either one value or a list of up to 20:
