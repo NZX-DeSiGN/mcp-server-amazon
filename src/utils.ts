@@ -11,23 +11,33 @@ export function getTimestamp() {
   )}`
 }
 
+/**
+ * Load the exported Amazon cookies, or return an empty list when the file is missing.
+ *
+ * Missing cookies is not fatal: anonymous scraping (product search, product details,
+ * public reviews) works fine without them, and mock mode needs no network at all.
+ * Tools that really need a session call `throwIfNotLoggedIn()` once the page is loaded.
+ */
 export function loadAmazonCookiesFile() {
-  if (fs.existsSync(COOKIES_FILE_PATH)) {
-    try {
-      const json = JSON.parse(fs.readFileSync(COOKIES_FILE_PATH, 'utf-8'))
-      console.error('[INFO] Loaded Amazon cookies from file')
-      return json.map((cookie: any) => ({
-        ...cookie,
-        // Ensure sameSite is set to a valid value
-        sameSite: cookie.sameSite || 'Lax',
-      }))
-    } catch (error: any) {
-      throw new Error(`Error reading or parsing amazonCookies.json: ${error.message}`)
-    }
-  } else {
-    throw new Error(
-      `No amazonCookies.json file found at ${COOKIES_FILE_PATH}. Please create it by logging into Amazon and exporting your cookies.`
+  if (!fs.existsSync(COOKIES_FILE_PATH)) {
+    console.error(
+      `[WARN] No cookies file found at ${COOKIES_FILE_PATH}. Running anonymously - ` +
+        'cart, orders and full review pages will not be available. ' +
+        'Create it by logging into Amazon and exporting your cookies.'
     )
+    return []
+  }
+
+  try {
+    const json = JSON.parse(fs.readFileSync(COOKIES_FILE_PATH, 'utf-8'))
+    console.error('[INFO] Loaded Amazon cookies from file')
+    return json.map((cookie: any) => ({
+      ...cookie,
+      // Ensure sameSite is set to a valid value
+      sameSite: cookie.sameSite || 'Lax',
+    }))
+  } catch (error: any) {
+    throw new Error(`Error reading or parsing ${COOKIES_FILE_PATH}: ${error.message}`)
   }
 }
 
