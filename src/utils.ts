@@ -276,3 +276,28 @@ export function cleanText(raw: string | undefined | null): string {
 
   return text
 }
+
+/**
+ * Map over `items` running at most `limit` tasks at once, keeping the results in input order.
+ *
+ * Used for batch tool calls: the point of accepting several ASINs in one call is to fetch
+ * them concurrently, but firing twenty requests at Amazon from one session earns a captcha,
+ * so the width stays bounded.
+ *
+ * `fn` is expected to resolve rather than throw - a batch must not lose every result because
+ * one item failed. Callers wrap their own errors into the result value.
+ */
+export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      results[index] = await fn(items[index], index)
+    }
+  })
+
+  await Promise.all(workers)
+  return results
+}

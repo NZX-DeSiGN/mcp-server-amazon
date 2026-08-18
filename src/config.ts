@@ -39,6 +39,13 @@ export const REUSE_BROWSER = envFlag('BROWSER_REUSE', true)
 export const BROWSER_IDLE_TIMEOUT_MS = envInt('BROWSER_IDLE_TIMEOUT_MS', 3 * 60 * 1000)
 
 /**
+ * How many items of a batch request are processed at once - env: BATCH_CONCURRENCY
+ * Amazon tolerates a handful of parallel reads from one session; going wider mostly buys
+ * captchas.
+ */
+export const BATCH_CONCURRENCY = envInt('BATCH_CONCURRENCY', 4)
+
+/**
  * Read pages over plain HTTP instead of driving Chrome when nothing has to be clicked
  * - env: HTTP_FIRST
  * Chrome is still used automatically whenever Amazon refuses to serve a plain request.
