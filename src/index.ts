@@ -56,11 +56,59 @@ async function runBatch<I, R>(input: I | I[], logTag: string, fn: (item: I) => P
   return JSON.stringify(entries, null, 2)
 }
 
+/**
+ * Sent to the client at initialisation and surfaced to the model alongside the tool list.
+ *
+ * The tool descriptions say what each tool does; this says how they fit together. Without
+ * it a model asked for "the best X under 50 €" tends to answer from the search page alone -
+ * ranking on the star average, which is what the seller optimises, rather than on what
+ * buyers actually wrote.
+ */
+const INSTRUCTIONS = `This server reads a real Amazon account by scraping the site. Prices, ratings and reviews are live.
+
+# Recommending a product
+
+When asked to find the best product matching criteria, do not answer from the search results alone.
+A star average hides why people were unhappy, and the first results are partly sponsored ads.
+
+1. Search with the criteria as filters (minPrice/maxPrice, brand, category, minRating, sortBy),
+   not as free text, and not by filtering the results yourself afterwards. Amazon applies the
+   filters to its whole catalogue; you would only be narrowing the page it already chose.
+2. Shortlist 3 to 5 candidates. Ignore \`isSponsored: true\` entries unless nothing else fits -
+   they are ads, not recommendations. Treat a high rating with very few reviews with caution.
+3. Fetch their details in ONE call by passing the list of ASINs to get-product-details.
+4. Read their reviews in TWO calls, both taking the same list of ASINs:
+   - starFilter "critical" - this is the important one: it is where recurring defects,
+     durability problems and misleading descriptions show up;
+   - starFilter "positive" - to confirm what the product is actually good at.
+   Prefer sortBy "recent" when the product may have changed batch or revision.
+5. Compare on what reviewers report, not on the star average alone, and say what the trade-offs
+   are. Name the recurring complaint of each candidate, even for the one you recommend.
+6. Recommend, with the product link, the price, and the reasons - quoting reviews where useful.
+   If the reviews contradict the rating, say so.
+
+Batch whenever you have more than one item: every lookup tool takes a list as well as a single
+value and fetches them concurrently. Five separate calls are five times slower for the same data.
+
+# Care
+
+- Ask the user before add-to-cart, remove-from-cart and clear-cart. They change a real cart.
+- perform-purchase is a mock: it confirms nothing and buys nothing. Never present its output
+  as a completed order.
+- get-orders-history usually fails: Amazon demands a fresh authentication that exported cookies
+  cannot satisfy. Report it and move on rather than retrying.
+- get-product-reviews returns at most 100 reviews per filter - an Amazon limit, not an error.
+  To go deeper, ask for each star level separately.
+- Always give the product link when you mention a product.`
+
 // Create server instance
-const server = new McpServer({
-  name: 'amazon',
-  version: '1.0.0',
-})
+const server = new McpServer(
+  {
+    name: 'amazon',
+    version: '1.0.0',
+  },
+  { instructions: INSTRUCTIONS }
+)
 
 server.tool('get-orders-history', 'Get orders history for a user', {}, async ({}) => {
   let ordersHistory: Awaited<ReturnType<typeof getOrdersHistory>>
