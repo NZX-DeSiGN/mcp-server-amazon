@@ -110,7 +110,7 @@ export async function getProductReviews(asin: string, options: GetProductReviews
       return await scrapeProductPageReviews(page, asin, { starFilter, sortBy, verifiedPurchaseOnly, maxReviews })
     }
 
-    const reviews = await collectReviews(page, maxReviews, 'get-product-reviews')
+    const reviews = await collectReviews(page, asin, { starFilter, sortBy, verifiedPurchaseOnly }, maxReviews)
     const $ = cheerio.load(await page.content())
 
     if (EXPORT_LIVE_SCRAPING_FOR_MOCKS) {
@@ -174,20 +174,164 @@ async function scrapeProductPageReviews(
   }
 }
 
+interface ReviewsQuery {
+  starFilter: ReviewsStarFilter
+  sortBy: ReviewsSortBy
+  verifiedPurchaseOnly: boolean
+}
+
+/** Batch size Amazon's own "show more" button asks for - keep it identical to stay unremarkable */
+const AJAX_PAGE_SIZE = 10
+/** Amazon stops handing out a cursor at ~100 reviews; this only guards against a loop that never converges */
+const MAX_AJAX_REQUESTS = 15
+const MAX_SHOW_MORE_CLICKS = 10
+
 /**
- * Amazon replaced the numbered pager on the reviews page with a "show more" button that
- * appends the next batch in place, so paginate by clicking it until we have enough.
+ * Collect reviews beyond the first batch.
+ *
+ * Amazon replaced the numbered pager with a "show more" button that fetches the next batch
+ * over XHR and appends it. Driving that through real clicks costs a DOM round-trip and a
+ * fixed wait per batch (~22s for 100 reviews); calling the same endpoint directly costs
+ * ~4.5s. So try the endpoint first and keep the clicks as a fallback, since the endpoint
+ * depends on internals (a CSRF token, an opaque cursor, a bespoke response format) that
+ * Amazon can change without the button ever breaking.
  */
-async function collectReviews(page: puppeteer.Page, maxReviews: number, logTag: string): Promise<ProductReview[]> {
+async function collectReviews(page: puppeteer.Page, asin: string, query: ReviewsQuery, maxReviews: number): Promise<ProductReview[]> {
   try {
     await page.waitForSelector('[data-hook="review"]', { timeout: 15000 })
   } catch {
-    console.error(`[WARN][${logTag}] No review element appeared - the product may have no reviews yet`)
+    console.error('[WARN][get-product-reviews] No review element appeared - the product may have no reviews yet')
     return []
   }
 
-  const MAX_CLICKS = 10
-  for (let i = 0; i < MAX_CLICKS; i++) {
+  const firstBatch = extractReviews(cheerio.load(await page.content()))
+  if (firstBatch.length >= maxReviews) return firstBatch
+
+  const viaAjax = await collectReviewsViaAjax(page, asin, query, maxReviews - firstBatch.length)
+  if (viaAjax !== null) {
+    return dedupeReviews([...firstBatch, ...viaAjax])
+  }
+
+  console.error('[WARN][get-product-reviews] Reviews endpoint unavailable, falling back to clicking "show more"')
+  return await collectReviewsByClicking(page, maxReviews)
+}
+
+/**
+ * Ask Amazon's own reviews endpoint for the next batches.
+ *
+ * Everything needed is already in the loaded page: `#cr-state-object` carries the CSRF token
+ * the reviews widget uses (the page's `<meta name="anti-csrftoken-a2z">` is a different token
+ * and the endpoint answers 403 to it), and the "show more" button carries the first cursor.
+ * Each response then embeds the next cursor in the markup of its own button.
+ *
+ * The request runs inside the page so the session cookies and the origin come for free.
+ * Returns null when anything is missing or refused, so the caller can fall back to clicking.
+ */
+async function collectReviewsViaAjax(
+  page: puppeteer.Page,
+  asin: string,
+  query: ReviewsQuery,
+  wanted: number
+): Promise<ProductReview[] | null> {
+  const payloads = await page.evaluate(
+    async (asin, filterByStar, sortBy, reviewerType, wanted, pageSize, maxRequests) => {
+      const stateEl = document.querySelector('#cr-state-object')
+      const rawState = stateEl?.getAttribute('data-state')
+      const csrfToken = rawState ? (JSON.parse(rawState) as { reviewsCsrfToken?: string }).reviewsCsrfToken : undefined
+
+      const button = document.querySelector('[data-hook="show-more-button"]')
+      const rawCursor = button?.getAttribute('data-reviews-state-param')
+      if (!csrfToken || !rawCursor) return null
+
+      let cursor: { nextPageToken?: string; pageNumber?: string } | null = JSON.parse(rawCursor)
+      const responses: string[] = []
+      let collected = 0
+
+      for (let i = 0; i < maxRequests && cursor?.nextPageToken && collected < wanted; i++) {
+        const reftag = `cm_cr_arp_d_paging_btm_${cursor.pageNumber}`
+        const body = new URLSearchParams({
+          sortBy,
+          reviewerType,
+          formatType: '',
+          mediaType: '',
+          filterByStar,
+          filterByAge: '',
+          pageNumber: String(cursor.pageNumber),
+          filterByLanguage: '',
+          filterByKeyword: '',
+          nextPageToken: cursor.nextPageToken,
+          shouldAppend: 'true',
+          deviceType: 'desktop',
+          canShowIntHeader: 'true',
+          reviewsShown: String(collected + pageSize),
+          reftag,
+          pageSize: String(pageSize),
+          asin,
+          scope: 'reviewsAjax0',
+        })
+
+        const response = await fetch(`/portal/customer-reviews/ajax/reviews/get/ref=${reftag}`, {
+          method: 'POST',
+          headers: {
+            'anti-csrftoken-a2z': csrfToken,
+            'x-requested-with': 'XMLHttpRequest',
+            'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          },
+          body: body.toString(),
+        })
+        if (!response.ok) return responses.length > 0 ? responses : null
+
+        const text = await response.text()
+        responses.push(text)
+        collected += pageSize
+
+        // Each response ships the next cursor inside the HTML of its own "show more" button
+        const token = text.match(/&quot;nextPageToken&quot;:&quot;([^&]*)&quot;/)
+        const pageNumber = text.match(/&quot;pageNumber&quot;:&quot;(\d+)&quot;/)
+        cursor = token?.[1] && pageNumber ? { nextPageToken: token[1], pageNumber: pageNumber[1] } : null
+      }
+
+      return responses
+    },
+    asin,
+    query.starFilter,
+    query.sortBy === 'recent' ? 'recent' : 'helpful',
+    query.verifiedPurchaseOnly ? 'avp_only_reviews' : 'all_reviews',
+    wanted,
+    AJAX_PAGE_SIZE,
+    MAX_AJAX_REQUESTS
+  )
+
+  if (payloads === null || payloads.length === 0) return null
+
+  const reviews = payloads.flatMap(payload => extractReviews(cheerio.load(extractReviewListHtml(payload))))
+  if (reviews.length === 0) return null
+
+  console.error(`[INFO][get-product-reviews] Fetched ${reviews.length} more reviews over ${payloads.length} endpoint call(s)`)
+  return reviews
+}
+
+/**
+ * The endpoint answers with Amazon's AUI stream: `["command","selector","html"]` tuples
+ * joined by `&&&`. Keep the HTML of the ones appending to the review list.
+ */
+function extractReviewListHtml(payload: string): string {
+  return payload
+    .split('&&&')
+    .map(chunk => {
+      try {
+        const [command, selector, html] = JSON.parse(chunk.trim()) as [string, string, string]
+        return command === 'append' && selector?.includes('review_list') && typeof html === 'string' ? html : ''
+      } catch {
+        return '' // ignore the non-JSON noise the stream is padded with
+      }
+    })
+    .join('')
+}
+
+/** Fallback: drive the "show more" button the way a visitor would */
+async function collectReviewsByClicking(page: puppeteer.Page, maxReviews: number): Promise<ProductReview[]> {
+  for (let i = 0; i < MAX_SHOW_MORE_CLICKS; i++) {
     const count = await page.$$eval('[data-hook="review"]', els => els.length)
     if (count >= maxReviews) break
 
@@ -203,10 +347,20 @@ async function collectReviews(page: puppeteer.Page, maxReviews: number, logTag: 
 
     const newCount = await page.$$eval('[data-hook="review"]', els => els.length)
     if (newCount === count) break // nothing more to load
-    console.error(`[INFO][${logTag}] Loaded more reviews: ${newCount}`)
+    console.error(`[INFO][get-product-reviews] Loaded more reviews: ${newCount}`)
   }
 
   return extractReviews(cheerio.load(await page.content()))
+}
+
+function dedupeReviews(reviews: ProductReview[]): ProductReview[] {
+  const seen = new Set<string>()
+  return reviews.filter(review => {
+    const key = review.id ?? `${review.author}|${review.date}|${review.title}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 // ##################################
