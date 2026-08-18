@@ -111,3 +111,24 @@ export async function throwIfNotLoggedIn(page: puppeteer.Page): Promise<void> {
     )
   }
 }
+
+/**
+ * Amazon ships the same string twice in a lot of nodes (desktop + mobile variants share a
+ * container), so `.text()` yields "4.2  4.2" or "Verified PurchaseVerified Purchase".
+ * Collapse whitespace and drop the duplicated half when the text is exactly doubled.
+ */
+export function cleanText(raw: string | undefined | null): string {
+  const text = (raw ?? '').replace(/\s+/g, ' ').trim()
+  if (text.length < 2) return text
+
+  // Exact "XX" duplication
+  if (text.length % 2 === 0) {
+    const half = text.slice(0, text.length / 2)
+    if (half === text.slice(text.length / 2)) return half.trim()
+  }
+  // "X X" duplication (the two copies separated by the whitespace we collapsed)
+  const spaced = text.match(/^(.+) \1$/)
+  if (spaced) return spaced[1].trim()
+
+  return text
+}
