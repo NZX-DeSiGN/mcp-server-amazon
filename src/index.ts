@@ -296,20 +296,41 @@ server.tool(
 
 server.tool(
   'search-products',
-  'Search for products on Amazon using one or several search terms - Returns the products matching each term - ' +
+  'Search for products on Amazon using one or several search terms, with optional filters - ' +
     'Pass a list of terms to run several searches in one call instead of calling this tool repeatedly - ' +
+    'Put the user criteria (budget, brand, minimum rating, category) into the filters rather than searching broadly ' +
+    'and sorting it out afterwards: the filters are applied by Amazon over its whole catalogue, ' +
+    'while filtering the returned page only ever narrows the first results - ' +
     'Always provide the product link when you mention a product in the response',
   {
     searchTerm: oneOrMany(z.string().min(1, { message: 'Search term cannot be empty.' })).describe(
       'The search term to look for products on Amazon (for example: "collagen", "laptop", "books"), ' +
         `or a list of up to ${BATCH_MAX_ITEMS} terms to run all those searches at once.`
     ),
+    minPrice: z.number().nonnegative().optional().describe('Minimum price, in the marketplace currency (e.g. 50 for 50 €).'),
+    maxPrice: z.number().positive().optional().describe('Maximum price, in the marketplace currency. Use it whenever the user gives a budget.'),
+    brand: z.string().optional().describe('Only return products of this brand, e.g. "Keychron".'),
+    category: z
+      .string()
+      .optional()
+      .describe('Restrict to an Amazon department, e.g. "computers", "electronics", "beauty", "pets". Omit to search everything.'),
+    minRating: z
+      .number()
+      .min(1)
+      .max(5)
+      .optional()
+      .describe('Only return products rated at least this many stars (e.g. 4 for "4 stars and up"). Products with no rating are excluded.'),
+    sortBy: z
+      .enum(['relevance', 'price-asc', 'price-desc', 'rating', 'newest'])
+      .optional()
+      .describe('Result ordering. "relevance" is Amazon default; "rating" surfaces the best reviewed first.'),
+    maxResults: z.number().int().min(1).max(60).optional().describe('How many products to return per search term (default 20).'),
   },
-  async ({ searchTerm }) => {
+  async ({ searchTerm, ...filters }) => {
     if (!Array.isArray(searchTerm)) {
       let result: Awaited<ReturnType<typeof searchProducts>>
       try {
-        result = await searchProducts(searchTerm)
+        result = await searchProducts(searchTerm, filters)
       } catch (error: any) {
         console.error('[ERROR][search-products] Error in search-products tool:', error)
         return {
@@ -318,14 +339,23 @@ server.tool(
       }
 
       if (!result || result.length === 0) {
-        return { content: [{ type: 'text', text: `No products found for search term "${searchTerm}".` }] }
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `No products found for search term "${searchTerm}"${
+                Object.keys(filters).length > 0 ? ' with the given filters. Consider relaxing them.' : '.'
+              }`,
+            },
+          ],
+        }
       }
 
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
     }
 
     return {
-      content: [{ type: 'text', text: await runBatch(searchTerm, 'search-products', term => searchProducts(term)) }],
+      content: [{ type: 'text', text: await runBatch(searchTerm, 'search-products', term => searchProducts(term, filters)) }],
     }
   }
 )

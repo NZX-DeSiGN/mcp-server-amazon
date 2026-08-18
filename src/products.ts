@@ -7,8 +7,11 @@ import { assertValidAsin, cleanText, navigate, withPage, getTimestamp, throwIfNo
 
 const __dirname = new URL('.', import.meta.url).pathname
 
-/** Amazon returns far more results than anyone reads; the scrapers keep this many */
+/** Amazon returns far more results than anyone reads; the scrapers keep this many by default */
 const SEARCH_RESULTS_LIMIT = 20
+
+/** Ceiling on a single search, whatever the caller asks for - one result page holds about this many */
+const SEARCH_RESULTS_HARD_LIMIT = 60
 
 // ##################################
 // Product Details
@@ -197,10 +200,108 @@ interface ProductSearchResult {
   productUrl?: string
 }
 
-export async function searchProducts(searchTerm: string): Promise<ProductSearchResult[]> {
+export interface SearchFilters {
+  /** Minimum price, in the marketplace currency */
+  minPrice?: number
+  /** Maximum price, in the marketplace currency */
+  maxPrice?: number
+  brand?: string
+  /** Amazon department alias, e.g. "computers", "electronics", "beauty" */
+  category?: string
+  /** Keep only products rated at least this many stars */
+  minRating?: number
+  sortBy?: SearchSort
+  /** How many results to return, up to SEARCH_RESULTS_HARD_LIMIT */
+  maxResults?: number
+}
+
+export type SearchSort = 'relevance' | 'price-asc' | 'price-desc' | 'rating' | 'newest'
+
+/** Amazon's sort keys; relevance is the default and takes no parameter */
+const SORT_PARAMS: Record<Exclude<SearchSort, 'relevance'>, string> = {
+  'price-asc': 'price-asc-rank',
+  'price-desc': 'price-desc-rank',
+  rating: 'review-rank',
+  newest: 'date-desc-rank',
+}
+
+/**
+ * Build the search URL, pushing every filter Amazon can apply itself into the query.
+ *
+ * `p_36` (price, in cents) and `p_89` (brand) are the standard refinement keys and take
+ * literal values, so they travel across marketplaces. The rating refinement (`p_72`) does
+ * not: its value is a marketplace-specific node id, so minRating is applied on the results
+ * instead - see filterResults().
+ */
+function buildSearchUrl(searchTerm: string, filters: SearchFilters): string {
+  const params = new URLSearchParams({ k: searchTerm })
+
+  const refinements: string[] = []
+  if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
+    const low = filters.minPrice !== undefined ? Math.round(filters.minPrice * 100) : ''
+    const high = filters.maxPrice !== undefined ? Math.round(filters.maxPrice * 100) : ''
+    refinements.push(`p_36:${low}-${high}`)
+  }
+  if (filters.brand) refinements.push(`p_89:${filters.brand}`)
+  if (refinements.length > 0) params.set('rh', refinements.join(','))
+
+  if (filters.category) params.set('i', filters.category)
+  if (filters.sortBy && filters.sortBy !== 'relevance') params.set('s', SORT_PARAMS[filters.sortBy])
+
+  return amazonUrl(`/s?${params.toString()}`)
+}
+
+/**
+ * Apply what Amazon did not.
+ *
+ * minRating is enforced here rather than through the `p_72` refinement, whose id changes per
+ * marketplace. Price is re-checked as a safety net: the refinement is occasionally ignored,
+ * and returning a product outside the budget the user gave is worse than returning fewer.
+ */
+function filterResults(results: ProductSearchResult[], filters: SearchFilters): ProductSearchResult[] {
+  return results.filter(product => {
+    if (filters.minRating !== undefined) {
+      const rating = parseRating(product.reviews?.averageRating)
+      if (rating === undefined || rating < filters.minRating) return false
+    }
+
+    if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
+      const price = parsePrice(product.price)
+      if (price === undefined) return false
+      if (filters.minPrice !== undefined && price < filters.minPrice) return false
+      if (filters.maxPrice !== undefined && price > filters.maxPrice) return false
+    }
+
+    return true
+  })
+}
+
+/** "4,6 sur 5 étoiles" / "4.6 out of 5 stars" -> 4.6 */
+function parseRating(label: string | undefined): number | undefined {
+  const match = label?.match(/(\d+[.,]\d+|\d+)/)
+  return match ? parseFloat(match[1].replace(',', '.')) : undefined
+}
+
+/** "1 299,99 €" / "$1,299.99" -> 1299.99 */
+function parsePrice(label: string | undefined): number | undefined {
+  if (!label) return undefined
+  const digits = label.replace(/[^\d.,]/g, '')
+  if (!digits) return undefined
+  // Whichever separator comes last is the decimal one
+  const normalised =
+    digits.lastIndexOf(',') > digits.lastIndexOf('.')
+      ? digits.replace(/\./g, '').replace(',', '.')
+      : digits.replace(/,/g, '')
+  const value = parseFloat(normalised)
+  return Number.isFinite(value) ? value : undefined
+}
+
+export async function searchProducts(searchTerm: string, filters: SearchFilters = {}): Promise<ProductSearchResult[]> {
   if (!searchTerm || searchTerm.trim().length === 0) {
     throw new Error('Search term is required and cannot be empty.')
   }
+
+  const wanted = Math.min(filters.maxResults ?? SEARCH_RESULTS_LIMIT, SEARCH_RESULTS_HARD_LIMIT)
 
   let html: string
   if (USE_MOCKS) {
@@ -208,16 +309,17 @@ export async function searchProducts(searchTerm: string): Promise<ProductSearchR
     const mockPath = `${__dirname}/../mocks/searchProducts.html`
     html = fs.readFileSync(mockPath, 'utf-8')
   } else {
-    const url = amazonUrl(`/s?k=${encodeURIComponent(searchTerm)}`)
+    const url = buildSearchUrl(searchTerm, filters)
     console.error(`[INFO][search-products] Searching for products with term "${searchTerm}" from ${url}`)
 
-    // Only the first SEARCH_RESULTS_LIMIT results are kept, and they arrive well before the
-    // end of the stream - stop as soon as the next one starts, so the last kept result is complete.
+    // Results arrive well before the end of the stream, so stop once enough have started.
+    // Client-side filters discard some, so read a margin beyond what the caller asked for.
+    const needed = filters.minRating !== undefined ? Math.min(wanted * 3, SEARCH_RESULTS_HARD_LIMIT) : wanted
     const overHttp = await tryFetchOverHttp(url, 'search-products', html => cheerio.load(html)('[role="listitem"]').length > 0, {
-      stopWhen: partial => (partial.match(/role="listitem"/g) || []).length > SEARCH_RESULTS_LIMIT,
+      stopWhen: partial => (partial.match(/role="listitem"/g) || []).length > needed,
       checkEveryBytes: 64 * 1024,
     })
-    if (overHttp) return extractSearchResultsPageData(cheerio.load(overHttp), searchTerm)
+    if (overHttp) return finishSearch(cheerio.load(overHttp), searchTerm, filters, wanted)
 
     html = await withPage(async page => {
       // Navigate to the search page
@@ -250,8 +352,16 @@ export async function searchProducts(searchTerm: string): Promise<ProductSearchR
     })
   }
 
-  const $ = cheerio.load(html)
-  return extractSearchResultsPageData($, searchTerm)
+  return finishSearch(cheerio.load(html), searchTerm, filters, wanted)
+}
+
+function finishSearch($: cheerio.CheerioAPI, searchTerm: string, filters: SearchFilters, wanted: number): ProductSearchResult[] {
+  const extracted = extractSearchResultsPageData($, searchTerm)
+  const kept = filterResults(extracted, filters)
+  if (kept.length < extracted.length) {
+    console.error(`[INFO][search-products] Filters dropped ${extracted.length - kept.length} of ${extracted.length} results`)
+  }
+  return kept.slice(0, wanted)
 }
 
 function extractSearchResultsPageData($: cheerio.CheerioAPI, searchTerm: string): ProductSearchResult[] {
@@ -265,7 +375,7 @@ function extractSearchResultsPageData($: cheerio.CheerioAPI, searchTerm: string)
     return []
   }
 
-  const limitedItems = $productItems.slice(0, SEARCH_RESULTS_LIMIT)
+  const limitedItems = $productItems.slice(0, SEARCH_RESULTS_HARD_LIMIT)
 
   console.error(`[INFO][search-products] Found ${$productItems.length} products, processing first ${limitedItems.length}`)
 
