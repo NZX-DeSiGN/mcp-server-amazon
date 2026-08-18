@@ -1,0 +1,5 @@
+{
+  "name": "amazon",
+  "version": "1.0.0",
+  "description": "Search Amazon, read product details and customer reviews, and manage the cart, through a logged-in session."
+}
