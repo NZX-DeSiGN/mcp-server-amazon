@@ -1,7 +1,7 @@
 import * as cheerio from 'cheerio'
 import fs from 'fs'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
-import { navigate, withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
+import { assertValidAsin, navigate, withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
 import { tryFetchOverHttp } from './http.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
@@ -149,9 +149,7 @@ function extractCartPageData($: cheerio.CheerioAPI): CartContent {
 // ##################################
 
 export async function addToCart(asin: string): Promise<{ success: boolean; message: string }> {
-  if (!asin || asin.length !== 10) {
-    throw new Error('Invalid ASIN provided. ASIN should be a 10-character string.')
-  }
+  assertValidAsin(asin)
 
   const url = amazonUrl(`/gp/product/${asin}`)
   console.error(`[INFO][add-to-cart] Adding product ${asin} to cart from ${url}`)
@@ -304,9 +302,7 @@ export async function clearCart() {
 // ##################################
 
 export async function removeFromCart(asin: string): Promise<{ success: boolean; message: string; itemsRemoved: number }> {
-  if (!asin || asin.length !== 10) {
-    throw new Error('Invalid ASIN provided. ASIN should be a 10-character string.')
-  }
+  assertValidAsin(asin)
 
   const url = amazonUrl(`/gp/cart/view.html`)
   console.error(`[INFO][remove-from-cart] Removing product ${asin} from cart at ${url}`)

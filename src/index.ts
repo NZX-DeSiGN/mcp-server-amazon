@@ -21,6 +21,16 @@ function oneOrMany<T extends z.ZodTypeAny>(schema: T) {
   return z.union([schema, z.array(schema).min(1).max(BATCH_MAX_ITEMS)])
 }
 
+/**
+ * Deliberately only checks the length. The real shape is enforced further down by
+ * assertValidAsin(), so that in a batch one bad id fails on its own line instead of the
+ * schema rejecting the whole call and throwing away the results that were fine.
+ */
+const ASIN_SCHEMA = z
+  .string()
+  .length(10, { message: 'ASIN must be a 10-character string.' })
+  .describe('An ASIN: "B" followed by 9 letters or digits (e.g. B0CSYRPPPM), or a 10-digit ISBN for books.')
+
 /** Enough to compare a page of search results; beyond that an agent should narrow down first */
 const BATCH_MAX_ITEMS = 20
 
@@ -137,7 +147,7 @@ server.tool(
   {
     asin: z
       .string()
-      .length(10, { message: 'ASIN must be a 10-character string.' })
+      .describe('An ASIN: "B" followed by 9 letters or digits, or a 10-digit ISBN for books.')
       .describe('The ASIN (Amazon Standard Identification Number) of the product to add to cart. Must be a 10-character string.'),
   },
   async ({ asin }) => {
@@ -175,7 +185,7 @@ server.tool(
   {
     asin: z
       .string()
-      .length(10, { message: 'ASIN must be a 10-character string.' })
+      .describe('An ASIN: "B" followed by 9 letters or digits, or a 10-digit ISBN for books.')
       .describe('The ASIN (Amazon Standard Identification Number) of the product to remove from the cart. Must be a 10-character string.'),
   },
   async ({ asin }) => {
@@ -238,7 +248,7 @@ server.tool(
     'Always provide the product link when you mention a product in the response',
   {
     asin: oneOrMany(
-      z.string().length(10, { message: 'ASIN must be a 10-character string.' })
+      ASIN_SCHEMA
     ).describe(
       'The ASIN (Amazon Standard Identification Number) of the product to get details for, ' +
         `or a list of up to ${BATCH_MAX_ITEMS} ASINs to fetch them all at once. Each ASIN is a 10-character string.`
@@ -329,7 +339,7 @@ server.tool(
     'Use it to judge whether a product is actually good before recommending or buying it, and quote what reviewers said - ' +
     'Always provide the product link when you mention a product in the response',
   {
-    asin: oneOrMany(z.string().length(10, { message: 'ASIN must be a 10-character string.' })).describe(
+    asin: oneOrMany(ASIN_SCHEMA).describe(
       'The ASIN (Amazon Standard Identification Number) of the product to read reviews for, ' +
         `or a list of up to ${BATCH_MAX_ITEMS} ASINs to read them all at once. Each ASIN is a 10-character string.`
     ),

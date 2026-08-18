@@ -3,7 +3,7 @@ import fs from 'fs'
 import puppeteer from 'puppeteer'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, HTTP_FIRST, amazonUrl } from './config.js'
 import { AmazonAuthRequiredError, AmazonHttpBlockedError, fetchAmazonHtml, postAmazonForm } from './http.js'
-import { cleanText, getTimestamp, isLoginPage, navigate, withPage } from './utils.js'
+import { assertValidAsin, cleanText, getTimestamp, isLoginPage, navigate, withPage } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
@@ -73,9 +73,7 @@ export interface ProductReviewsResult {
 // ##################################
 
 export async function getProductReviews(asin: string, options: GetProductReviewsOptions = {}): Promise<ProductReviewsResult> {
-  if (!asin || asin.length !== 10) {
-    throw new Error('Invalid ASIN provided. ASIN should be a 10-character string.')
-  }
+  assertValidAsin(asin)
 
   const starFilter = options.starFilter ?? 'all_stars'
   const sortBy = options.sortBy ?? 'helpful'
@@ -236,8 +234,12 @@ async function collectOverHttp(
       reviews: dedupeReviews(reviews).slice(0, maxReviews),
     }
   } catch (error: any) {
-    // Not being logged in is expected here: the browser path owns the public product-page
-    // fallback, so hand over instead of surfacing an auth error.
+    // A missing product page is final - the browser would spend seconds reaching the same
+    // 404, then fall through to a product page that does not exist either.
+    if (error instanceof AmazonHttpBlockedError && !error.retryWithBrowser) throw error
+
+    // Not being logged in, on the other hand, is expected here: the browser path owns the
+    // public product-page fallback, so hand over instead of surfacing an auth error.
     const reason =
       error instanceof AmazonAuthRequiredError || error instanceof AmazonHttpBlockedError
         ? error.message

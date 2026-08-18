@@ -301,3 +301,25 @@ export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (i
   await Promise.all(workers)
   return results
 }
+
+/**
+ * A real ASIN is either "B" followed by nine alphanumerics, or a 10-digit ISBN-10 (books).
+ *
+ * Length alone is not enough. Asked for a 10-character string that is not an ASIN, Amazon
+ * answers 200 with some *other* product's page and echoes the requested id back in
+ * `input#ASIN`, the canonical link and `data-asin` - so nothing in the markup reveals the
+ * mismatch, and a hallucinated id comes back as a confident, wrong product.
+ */
+const ASIN_PATTERN = /^(B[0-9A-Z]{9}|[0-9]{9}[0-9X])$/i
+
+export function isValidAsin(asin: string): boolean {
+  return ASIN_PATTERN.test(asin)
+}
+
+export function assertValidAsin(asin: string): void {
+  if (!asin || !isValidAsin(asin)) {
+    throw new Error(
+      `Invalid ASIN "${asin}". An ASIN is "B" followed by 9 letters or digits (e.g. B0CSYRPPPM), or a 10-digit ISBN for books.`
+    )
+  }
+}

@@ -86,6 +86,9 @@ export async function fetchAmazonHtml(url: string, options: FetchHtmlOptions = {
   const { stopWhen, checkEveryBytes = 256 * 1024, timeoutMs = 30000 } = options
 
   const response = await fetch(url, { headers: headers(), redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) })
+  // 404 means the page does not exist; loading it again in Chrome can only fail the same
+  // way, several seconds later.
+  if (response.status === 404) throw new AmazonHttpBlockedError('HTTP 404 - no such product page', false)
   if (!response.ok) throw new AmazonHttpBlockedError(`HTTP ${response.status}`)
 
   if (!stopWhen || !response.body) {

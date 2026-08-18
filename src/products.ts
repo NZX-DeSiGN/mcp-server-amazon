@@ -3,7 +3,7 @@ import fs from 'fs'
 import puppeteer from 'puppeteer'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, HTTP_FIRST, amazonUrl } from './config.js'
 import { tryFetchOverHttp } from './http.js'
-import { cleanText, navigate, withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
+import { assertValidAsin, cleanText, navigate, withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
@@ -36,9 +36,7 @@ interface ProductDetails {
 }
 
 export async function getProductDetails(asin: string): Promise<ProductDetails> {
-  if (!asin || asin.length !== 10) {
-    throw new Error('Invalid ASIN provided. ASIN should be a 10-character string.')
-  }
+  assertValidAsin(asin)
 
   let html: string
   if (USE_MOCKS) {
