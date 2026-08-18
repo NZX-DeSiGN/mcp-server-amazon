@@ -1,5 +1,7 @@
 {
   "name": "amazon",
   "version": "1.0.0",
-  "description": "Search Amazon, read product details and customer reviews, and manage the cart, through a logged-in session."
+  "description": "Search Amazon, read product details and customer reviews, and manage the cart, through a logged-in session.",
+  "license": "MIT",
+  "repository": "https://github.com/NZX-DeSiGN/mcp-server-amazon"
 }

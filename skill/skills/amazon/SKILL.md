@@ -1,6 +1,7 @@
 ---
 name: amazon
 description: Search Amazon, read product details and customer reviews, and manage the cart, using the user's logged-in session. Use when asked to find, compare, judge or buy a product on Amazon, to check what reviewers say about a product, or to look at the Amazon cart.
+allowed-tools: Bash
 ---
 
 # Amazon
