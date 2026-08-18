@@ -288,6 +288,14 @@ export function extractSummary($: cheerio.CheerioAPI): ProductReviewsResult['sum
     }
   )
 
+  // Amazon drops the row entirely for a rating nobody gave; report it as 0% rather than
+  // leaving a hole, so callers can sum the breakdown without special-casing.
+  if (Object.keys(ratingBreakdown).length > 0) {
+    for (const star of ['1', '2', '3', '4', '5']) {
+      if (!ratingBreakdown[star]) ratingBreakdown[star] = '0%'
+    }
+  }
+
   return {
     averageRating: cleanText($('[data-hook="rating-out-of-text"]').first().text()) || undefined,
     totalRatings: cleanText($('[data-hook="total-review-count"]').first().text()) || undefined,
