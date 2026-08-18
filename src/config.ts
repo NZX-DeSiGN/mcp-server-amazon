@@ -20,6 +20,24 @@ export const USE_MOCKS = envFlag('USE_MOCK_RESPONSES', false)
  */
 export const EXPORT_LIVE_SCRAPING_FOR_MOCKS = envFlag('EXPORT_MOCKS', false)
 
+function envInt(name: string, defaultValue: number): number {
+  const raw = Number(process.env[name])
+  return Number.isFinite(raw) && raw >= 0 ? raw : defaultValue
+}
+
+/**
+ * Keep one Chrome alive across tool calls instead of launching one per call - env: BROWSER_REUSE
+ * Launching costs ~180ms, which is 10-20% of a tuned request.
+ */
+export const REUSE_BROWSER = envFlag('BROWSER_REUSE', true)
+
+/**
+ * Close the shared Chrome after this long without any activity - env: BROWSER_IDLE_TIMEOUT_MS
+ * The MCP server is long-lived but often idle; holding a browser open forever would
+ * keep several hundred MB resident for nothing. 0 disables the timer.
+ */
+export const BROWSER_IDLE_TIMEOUT_MS = envInt('BROWSER_IDLE_TIMEOUT_MS', 3 * 60 * 1000)
+
 export const COOKIES_FILE_PATH = process.env.AMAZON_COOKIES_FILE || `${__dirname}/../amazonCookies.json`
 
 /**

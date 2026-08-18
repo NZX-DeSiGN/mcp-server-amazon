@@ -1,6 +1,6 @@
 import fs from 'fs'
 import puppeteer from 'puppeteer'
-import { COOKIES_FILE_PATH, AMAZON_COOKIES, IS_BROWSER_VISIBLE } from './config.js'
+import { COOKIES_FILE_PATH, AMAZON_COOKIES, IS_BROWSER_VISIBLE, REUSE_BROWSER, BROWSER_IDLE_TIMEOUT_MS } from './config.js'
 
 /** Get the current timestamp like "2024-06-06_15-30-45" */
 export function getTimestamp() {
@@ -41,8 +41,22 @@ export function loadAmazonCookiesFile() {
   }
 }
 
-export async function createBrowserAndPage(): Promise<{ browser: puppeteer.Browser; page: puppeteer.Page }> {
-  // Launch Puppeteer
+// ##################################
+// Shared browser
+// ##################################
+
+/**
+ * One Chrome is shared by every tool call and closed again once nothing has used it for
+ * BROWSER_IDLE_TIMEOUT_MS. Launching costs ~180ms - worth avoiding on every call - but an
+ * idle browser holds a few hundred MB, which is not worth keeping for a server that spends
+ * most of its life waiting.
+ */
+let sharedBrowser: puppeteer.Browser | null = null
+let launchInFlight: Promise<puppeteer.Browser> | null = null
+let pagesInUse = 0
+let idleTimer: NodeJS.Timeout | null = null
+
+async function launchBrowser(): Promise<puppeteer.Browser> {
   const browser = await puppeteer.launch({
     headless: !IS_BROWSER_VISIBLE,
     devtools: false,
@@ -51,7 +65,6 @@ export async function createBrowserAndPage(): Promise<{ browser: puppeteer.Brows
     defaultViewport: null,
   })
 
-  // Set cookies if available
   if (AMAZON_COOKIES?.length > 0) {
     await browser.setCookie(...AMAZON_COOKIES)
     console.error('[INFO] Set Amazon cookies in the browser')
@@ -59,8 +72,86 @@ export async function createBrowserAndPage(): Promise<{ browser: puppeteer.Brows
     console.error('[WARN] No Amazon cookies found, proceeding without them')
   }
 
-  const page = await browser.newPage()
+  return browser
+}
 
+async function acquireBrowser(): Promise<puppeteer.Browser> {
+  if (sharedBrowser?.connected) return sharedBrowser
+  // Concurrent calls must not each launch their own Chrome
+  if (launchInFlight) return launchInFlight
+
+  launchInFlight = launchBrowser()
+    .then(browser => {
+      sharedBrowser = browser
+      // Chrome can die on its own; drop the handle so the next call relaunches
+      browser.on('disconnected', () => {
+        if (sharedBrowser === browser) sharedBrowser = null
+      })
+      return browser
+    })
+    .finally(() => {
+      launchInFlight = null
+    })
+
+  return launchInFlight
+}
+
+function cancelIdleClose() {
+  if (idleTimer) {
+    clearTimeout(idleTimer)
+    idleTimer = null
+  }
+}
+
+function scheduleIdleClose() {
+  cancelIdleClose()
+  if (pagesInUse > 0 || !sharedBrowser) return
+
+  if (!REUSE_BROWSER) {
+    void closeSharedBrowser()
+    return
+  }
+  if (BROWSER_IDLE_TIMEOUT_MS === 0) return
+
+  idleTimer = setTimeout(() => {
+    if (pagesInUse === 0) {
+      console.error(`[INFO] Closing idle browser after ${BROWSER_IDLE_TIMEOUT_MS}ms without activity`)
+      void closeSharedBrowser()
+    }
+  }, BROWSER_IDLE_TIMEOUT_MS)
+  // Never let the idle timer keep the process alive on its own
+  idleTimer.unref?.()
+}
+
+export async function closeSharedBrowser(): Promise<void> {
+  cancelIdleClose()
+  const browser = sharedBrowser
+  sharedBrowser = null
+  if (browser) await browser.close().catch(() => {})
+}
+
+/**
+ * Run `fn` with a fresh page on the shared browser, then close the page (not the browser).
+ * Always use this rather than launching Chrome directly, so the reuse accounting stays correct.
+ */
+export async function withPage<T>(fn: (page: puppeteer.Page) => Promise<T>): Promise<T> {
+  cancelIdleClose()
+  pagesInUse++
+
+  let page: puppeteer.Page | undefined
+  try {
+    const browser = await acquireBrowser()
+    page = await browser.newPage()
+    await preparePage(page)
+    return await fn(page)
+  } finally {
+    if (page) await page.close().catch(() => {})
+    pagesInUse--
+    scheduleIdleClose()
+  }
+}
+
+async function preparePage(page: puppeteer.Page): Promise<void> {
   // Remove automation indicators
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, 'webdriver', {
@@ -75,8 +166,13 @@ export async function createBrowserAndPage(): Promise<{ browser: puppeteer.Brows
 
   // Set viewport
   await page.setViewport({ width: 1366, height: 768 })
+}
 
-  return { browser, page }
+// Do not leave a Chrome behind when the MCP server stops
+for (const signal of ['exit', 'SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    void closeSharedBrowser()
+  })
 }
 
 export async function downloadImageAsBase64(url: string): Promise<string> {

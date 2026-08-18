@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio'
 import fs from 'fs'
 import puppeteer from 'puppeteer'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
-import { cleanText, createBrowserAndPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
+import { cleanText, withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
@@ -45,9 +45,7 @@ export async function getProductDetails(asin: string): Promise<ProductDetails> {
     const url = amazonUrl(`/gp/product/${asin}`)
     console.error(`[INFO][get-product-details] Fetching product details from ${url}`)
 
-    const { browser, page } = await createBrowserAndPage()
-
-    try {
+    html = await withPage(async page => {
       // Navigate to the product page
       await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 })
 
@@ -71,10 +69,8 @@ export async function getProductDetails(asin: string): Promise<ProductDetails> {
       }
 
       // Get the HTML content after JavaScript execution
-      html = await page.content()
-    } finally {
-      await browser.close()
-    }
+      return await page.content()
+    })
   }
 
   const $ = cheerio.load(html)
@@ -210,9 +206,7 @@ export async function searchProducts(searchTerm: string): Promise<ProductSearchR
     const url = amazonUrl(`/s?k=${encodeURIComponent(searchTerm)}`)
     console.error(`[INFO][search-products] Searching for products with term "${searchTerm}" from ${url}`)
 
-    const { browser, page } = await createBrowserAndPage()
-
-    try {
+    html = await withPage(async page => {
       // Navigate to the search page
       await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 })
 
@@ -239,10 +233,8 @@ export async function searchProducts(searchTerm: string): Promise<ProductSearchR
       }
 
       // Get the HTML content after JavaScript execution
-      html = await page.content()
-    } finally {
-      await browser.close()
-    }
+      return await page.content()
+    })
   }
 
   const $ = cheerio.load(html)

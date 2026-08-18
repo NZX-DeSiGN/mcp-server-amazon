@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio'
 import fs from 'fs'
 import puppeteer from 'puppeteer'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
-import { cleanText, createBrowserAndPage, getTimestamp, isLoginPage } from './utils.js'
+import { cleanText, getTimestamp, isLoginPage, withPage } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
@@ -98,8 +98,7 @@ export async function getProductReviews(asin: string, options: GetProductReviews
   const reviewsUrl = buildReviewsUrl(asin, starFilter, sortBy, verifiedPurchaseOnly)
   console.error(`[INFO][get-product-reviews] Fetching reviews for ${asin} from ${reviewsUrl}`)
 
-  const { browser, page } = await createBrowserAndPage()
-  try {
+  return await withPage(async page => {
     await page.goto(reviewsUrl, { waitUntil: 'networkidle2', timeout: 30000 })
 
     // The full reviews list is session-gated: without valid cookies Amazon bounces to
@@ -128,9 +127,7 @@ export async function getProductReviews(asin: string, options: GetProductReviews
       appliedFilters: { starFilter, sortBy, verifiedPurchaseOnly, filtersApplied: true },
       reviews: reviews.slice(0, maxReviews),
     }
-  } finally {
-    await browser.close()
-  }
+  })
 }
 
 function buildReviewsUrl(asin: string, starFilter: ReviewsStarFilter, sortBy: ReviewsSortBy, verifiedPurchaseOnly: boolean): string {
@@ -147,7 +144,7 @@ function buildReviewsUrl(asin: string, starFilter: ReviewsStarFilter, sortBy: Re
 async function scrapeProductPageReviews(
   page: puppeteer.Page,
   asin: string,
-  opts: { starFilter: ReviewsStarFilter; sortBy: ReviewsSortBy; verifiedPurchaseOnly: boolean; maxReviews: number }
+  opts: { starFilter: ReviewsStarFilter; sortBy: ReviewsSortBy; verifiedPurchaseOnly: boolean; maxReviews: number },
 ): Promise<ProductReviewsResult> {
   const productUrl = amazonUrl(`/gp/product/${asin}`)
   await page.goto(productUrl, { waitUntil: 'networkidle2', timeout: 30000 })
@@ -227,12 +224,7 @@ async function collectReviews(page: puppeteer.Page, asin: string, query: Reviews
  * The request runs inside the page so the session cookies and the origin come for free.
  * Returns null when anything is missing or refused, so the caller can fall back to clicking.
  */
-async function collectReviewsViaAjax(
-  page: puppeteer.Page,
-  asin: string,
-  query: ReviewsQuery,
-  wanted: number
-): Promise<ProductReview[] | null> {
+async function collectReviewsViaAjax(page: puppeteer.Page, asin: string, query: ReviewsQuery, wanted: number): Promise<ProductReview[] | null> {
   const payloads = await page.evaluate(
     async (asin, filterByStar, sortBy, reviewerType, wanted, pageSize, maxRequests) => {
       const stateEl = document.querySelector('#cr-state-object')
@@ -299,7 +291,7 @@ async function collectReviewsViaAjax(
     query.verifiedPurchaseOnly ? 'avp_only_reviews' : 'all_reviews',
     wanted,
     AJAX_PAGE_SIZE,
-    MAX_AJAX_REQUESTS
+    MAX_AJAX_REQUESTS,
   )
 
   if (payloads === null || payloads.length === 0) return null
@@ -390,7 +382,7 @@ export function extractReviews($: cheerio.CheerioAPI): ProductReview[] {
     const body = cleanText(
       $review.find('[data-hook="reviewRichContentContainer"]').first().text() ||
         $review.find('[data-hook="review-body"]').first().text() ||
-        $review.find('[data-hook="reviewText"]').first().text()
+        $review.find('[data-hook="reviewText"]').first().text(),
     )
 
     const review: ProductReview = {
@@ -433,14 +425,12 @@ export function extractSummary($: cheerio.CheerioAPI): ProductReviewsResult['sum
   // Each histogram row is a link whose aria-label carries both numbers - read that
   // rather than the layout, which is a <table> on one page and a <ul> on the other,
   // and whose visible cells repeat every star label in every row.
-  $('#histogramTable a[aria-label], #cm_cr_dp_d_rating_histogram a[aria-label], [data-hook="cr-histogram"] a[aria-label]').each(
-    (_index, element) => {
-      const label = $(element).attr('aria-label') || ''
-      // "74% des commentaires ont reçu 5 étoiles" but also "74 percent of reviews have 5 stars"
-      const match = label.match(/(\d+)\s*(?:%|percent|pour ?cent|Prozent|por ciento)\D*?(\d)\s*(?:stars?|étoiles?|Sterne?|estrellas?|stelle?)/i)
-      if (match && !ratingBreakdown[match[2]]) ratingBreakdown[match[2]] = `${match[1]}%`
-    }
-  )
+  $('#histogramTable a[aria-label], #cm_cr_dp_d_rating_histogram a[aria-label], [data-hook="cr-histogram"] a[aria-label]').each((_index, element) => {
+    const label = $(element).attr('aria-label') || ''
+    // "74% des commentaires ont reçu 5 étoiles" but also "74 percent of reviews have 5 stars"
+    const match = label.match(/(\d+)\s*(?:%|percent|pour ?cent|Prozent|por ciento)\D*?(\d)\s*(?:stars?|étoiles?|Sterne?|estrellas?|stelle?)/i)
+    if (match && !ratingBreakdown[match[2]]) ratingBreakdown[match[2]] = `${match[1]}%`
+  })
 
   // Amazon drops the row entirely for a rating nobody gave; report it as 0% rather than
   // leaving a hole, so callers can sum the breakdown without special-casing.
