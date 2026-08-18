@@ -71,9 +71,17 @@ All settings are environment variables, so nothing has to be edited and rebuilt:
 | `USE_MOCK_RESPONSES` | `false` | Serve the HTML in `mocks/` instead of scraping |
 | `EXPORT_MOCKS` | `false` | Dump the scraped HTML into `mocks/` (several MB per call) |
 | `BROWSER_VISIBLE` | `false` | Run Chrome with a window, to watch the scraping |
+| `BROWSER_REUSE` | `true` | Share one Chrome across tool calls instead of launching one per call |
+| `BROWSER_IDLE_TIMEOUT_MS` | `180000` | Close the shared Chrome after this long without activity (`0` keeps it open) |
+| `BLOCK_ASSETS` | `true` | Skip images, stylesheets, fonts, ads and telemetry while scraping |
 
 `AMAZON_LOCALE` defaults to `en` because a few scrapers match on page text; both
 English and French wordings are recognised, so `fr` works too.
+
+The three browser settings only trade speed for isolation: with the defaults a
+search takes ~2s instead of ~4.2s, and an idle server holds no browser at all.
+`add-to-cart`, `remove-from-cart` and `clear-cart` always get a fully rendered
+page regardless of `BLOCK_ASSETS`, since they click Amazon's own widgets.
 
 ## Claude Desktop Integration
 

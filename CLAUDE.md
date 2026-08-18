@@ -53,7 +53,8 @@ Session-gated pages throw through `throwIfNotLoggedIn()`, which detects Amazon's
 ### Configuration
 
 Everything is env-driven (`src/config.ts`): `AMAZON_DOMAIN`, `AMAZON_LOCALE`,
-`AMAZON_COOKIES_FILE`, `USE_MOCK_RESPONSES`, `EXPORT_MOCKS`, `BROWSER_VISIBLE`.
+`AMAZON_COOKIES_FILE`, `USE_MOCK_RESPONSES`, `EXPORT_MOCKS`, `BROWSER_VISIBLE`,
+`BROWSER_REUSE`, `BROWSER_IDLE_TIMEOUT_MS`, `BLOCK_ASSETS`.
 Build URLs with `amazonUrl('/gp/product/<asin>')` rather than hardcoding a domain
 or the `/-/en/` language segment.
 
@@ -63,6 +64,15 @@ or the `/-/en/` language segment.
 - Uses headless Chrome with specific flags to avoid detection
 - Implements user agent spoofing
 - Handles Amazon's anti-bot measures
+- One Chrome is shared by all calls via `withPage()` in `src/utils.ts`, and closes
+  itself after `BROWSER_IDLE_TIMEOUT_MS` idle. Never call `puppeteer.launch()`
+  directly - the page accounting is what decides when the browser may close.
+- Navigate with `navigate()`, which waits for `domcontentloaded` and leaves the
+  "is the data there" question to each scraper's `waitForSelector`. `networkidle2`
+  waits out Amazon's ad traffic and cost 90% of every request.
+- Flows that click Amazon's widgets pass `{ interactive: true }` to `withPage()`
+  and `{ waitUntil: 'load' }` to `navigate()`: they need a booted, fully rendered
+  page, so nothing is blocked for them.
 
 ### Error Handling
 - Detects login page redirects and throws authentication errors
