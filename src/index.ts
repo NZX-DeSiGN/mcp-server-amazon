@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { getOrdersHistory } from './orders.js'
 import { getCartContent, addToCart, clearCart, removeFromCart } from './cart.js'
 import { getProductDetails, searchProducts } from './products.js'
+import { getProductReviews } from './reviews.js'
 
 // Create server instance
 const server = new McpServer({
@@ -269,6 +270,66 @@ server.tool(
           {
             type: 'text',
             text: `No products found for search term "${searchTerm}".`,
+          },
+        ],
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    }
+  }
+)
+
+server.tool(
+  'get-product-reviews',
+  'Read the customer reviews of a product using its ASIN - ' +
+    'Returns the rating summary, the star breakdown and the individual reviews (title, rating, date, verified-purchase badge, text) - ' +
+    'Use it to judge whether a product is actually good before recommending or buying it, and quote what reviewers said - ' +
+    'Always provide the product link when you mention a product in the response',
+  {
+    asin: z
+      .string()
+      .length(10, { message: 'ASIN must be a 10-character string.' })
+      .describe('The ASIN (Amazon Standard Identification Number) of the product to read reviews for. Must be a 10-character string.'),
+    starFilter: z
+      .enum(['all_stars', 'five_star', 'four_star', 'three_star', 'two_star', 'one_star', 'positive', 'critical'])
+      .optional()
+      .describe('Only return reviews with this rating. Use "critical" to look for recurring complaints. Requires a logged-in session.'),
+    sortBy: z
+      .enum(['helpful', 'recent'])
+      .optional()
+      .describe('Order of the reviews: "helpful" (Amazon default) or "recent". Requires a logged-in session.'),
+    verifiedPurchaseOnly: z.boolean().optional().describe('Only return reviews from verified purchases. Requires a logged-in session.'),
+    maxReviews: z.number().int().min(1).max(100).optional().describe('How many reviews to return, between 1 and 100 (default 20).'),
+  },
+  async ({ asin, starFilter, sortBy, verifiedPurchaseOnly, maxReviews }) => {
+    let result: Awaited<ReturnType<typeof getProductReviews>>
+    try {
+      result = await getProductReviews(asin, { starFilter, sortBy, verifiedPurchaseOnly, maxReviews })
+    } catch (error: any) {
+      console.error('[ERROR][get-product-reviews] Error in get-product-reviews tool:', error)
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `An error occurred while retrieving product reviews. Error: ${error.message}`,
+          },
+        ],
+      }
+    }
+
+    if (result.reviews.length === 0) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `No reviews found for product ${asin}.${result.note ? ` ${result.note}` : ''}`,
           },
         ],
       }
