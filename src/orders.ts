@@ -3,6 +3,7 @@ import fs from 'fs'
 import puppeteer from 'puppeteer'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
 import { navigate, withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
+import { tryFetchOverHttp } from './http.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
@@ -19,6 +20,9 @@ export async function getOrdersHistory() {
   } else {
     const url = amazonUrl(`/gp/css/order-history`)
     console.error(`[INFO][get-orders-history] Fetching orders history from ${url}`)
+
+    const overHttp = await tryFetchOverHttp(url, 'get-orders-history', page => page.includes('order-card'))
+    if (overHttp) return extractOrderCards(cheerio.load(overHttp))
 
     html = await withPage(async page => {
       // Navigate to the page
@@ -52,11 +56,13 @@ export async function getOrdersHistory() {
     })
   }
 
-  const $ = cheerio.load(html)
-  const orderCards = $('.order-card')
+  return extractOrderCards(cheerio.load(html))
+}
+
+function extractOrderCards($: cheerio.CheerioAPI) {
+  return $('.order-card')
     .map((index, element) => extractOrdersHistoryPageData($, $(element)))
     .get()
-  return orderCards
 }
 
 function extractOrdersHistoryPageData($: cheerio.CheerioAPI, $card: cheerio.Cheerio<any>) {

@@ -1,4 +1,4 @@
-import { AMAZON_COOKIES } from './config.js'
+import { AMAZON_COOKIES, HTTP_FIRST } from './config.js'
 
 /**
  * Direct HTTP access to Amazon, used instead of driving Chrome when a page is only read.
@@ -24,11 +24,32 @@ const BROWSER_HEADERS: Record<string, string> = {
   'sec-fetch-user': '?1',
 }
 
-/** Amazon refused to serve the page to a plain HTTP client - the caller should retry with Chrome */
+/** Amazon refused to serve the page to a plain HTTP client */
 export class AmazonHttpBlockedError extends Error {
-  constructor(reason: string) {
+  /**
+   * Whether Chrome stands a chance where the plain request failed.
+   *
+   * A captcha or an odd status is about *how* we asked, and a real browser often gets
+   * through. A sign-in redirect is about *who* we are: the browser carries the same cookies
+   * and hits the same wall, so retrying only doubles the wait before the same error.
+   */
+  readonly retryWithBrowser: boolean
+
+  constructor(reason: string, retryWithBrowser = true) {
     super(`Amazon did not serve this page over plain HTTP (${reason})`)
     this.name = 'AmazonHttpBlockedError'
+    this.retryWithBrowser = retryWithBrowser
+  }
+}
+
+/** Raised when Amazon wants a (re-)authentication that the exported cookies cannot satisfy */
+export class AmazonAuthRequiredError extends Error {
+  constructor() {
+    super(
+      'You need to be logged in to access this feature. Amazon redirected to its sign-in page - ' +
+        'your amazonCookies.json is missing or its session has expired. Log in to Amazon again and re-export your cookies.'
+    )
+    this.name = 'AmazonAuthRequiredError'
   }
 }
 
@@ -42,7 +63,7 @@ function headers(extra: Record<string, string> = {}): Record<string, string> {
 }
 
 function assertServed(html: string, finalUrl: string): void {
-  if (/\/ap\/signin|\/ap\/cvf\//.test(finalUrl)) throw new AmazonHttpBlockedError('redirected to sign-in')
+  if (/\/ap\/signin|\/ap\/cvf\//.test(finalUrl)) throw new AmazonAuthRequiredError()
   if (/\/errors\/validateCaptcha/.test(finalUrl) || /validateCaptcha|Saisissez les caractères/i.test(html.slice(0, 20000))) {
     throw new AmazonHttpBlockedError('captcha wall')
   }
@@ -95,6 +116,37 @@ export async function fetchAmazonHtml(url: string, options: FetchHtmlOptions = {
 
   assertServed(html, response.url)
   return html
+}
+
+/**
+ * Read a page over plain HTTP, or return null so the caller falls back to Chrome.
+ *
+ * `isComplete` guards against the quiet failure mode: Amazon answering 200 with a page that
+ * simply does not hold the data (an interstitial, a layout we do not know). Falling back
+ * costs a browser load; parsing an unexpected page costs a wrong answer.
+ */
+export async function tryFetchOverHttp(
+  url: string,
+  logTag: string,
+  isComplete: (html: string) => boolean,
+  options: FetchHtmlOptions = {}
+): Promise<string | null> {
+  if (!HTTP_FIRST) return null
+
+  try {
+    const html = await fetchAmazonHtml(url, options)
+    if (isComplete(html)) return html
+    console.error(`[WARN][${logTag}] HTTP response did not contain the expected content, falling back to the browser`)
+  } catch (error: any) {
+    // The browser would present the very same expired session, so surface the error now
+    // instead of paying for a page load that can only fail the same way.
+    if (error instanceof AmazonAuthRequiredError) throw error
+    if (error instanceof AmazonHttpBlockedError && !error.retryWithBrowser) throw error
+
+    const reason = error instanceof AmazonHttpBlockedError ? error.message : `HTTP request failed: ${error.message}`
+    console.error(`[WARN][${logTag}] ${reason}, falling back to the browser`)
+  }
+  return null
 }
 
 /** POST a form-encoded body (Amazon's internal AJAX endpoints) and return the raw response */

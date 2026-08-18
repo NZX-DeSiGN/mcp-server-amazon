@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio'
 import fs from 'fs'
 import puppeteer from 'puppeteer'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, HTTP_FIRST, amazonUrl } from './config.js'
-import { AmazonHttpBlockedError, fetchAmazonHtml, postAmazonForm } from './http.js'
+import { AmazonAuthRequiredError, AmazonHttpBlockedError, fetchAmazonHtml, postAmazonForm } from './http.js'
 import { cleanText, getTimestamp, isLoginPage, navigate, withPage } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
@@ -236,7 +236,12 @@ async function collectOverHttp(
       reviews: dedupeReviews(reviews).slice(0, maxReviews),
     }
   } catch (error: any) {
-    const reason = error instanceof AmazonHttpBlockedError ? error.message : `HTTP request failed: ${error.message}`
+    // Not being logged in is expected here: the browser path owns the public product-page
+    // fallback, so hand over instead of surfacing an auth error.
+    const reason =
+      error instanceof AmazonAuthRequiredError || error instanceof AmazonHttpBlockedError
+        ? error.message
+        : `HTTP request failed: ${error.message}`
     console.error(`[WARN][get-product-reviews] ${reason}, falling back to the browser`)
     return null
   }

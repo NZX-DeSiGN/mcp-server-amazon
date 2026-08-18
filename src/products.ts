@@ -2,39 +2,13 @@ import * as cheerio from 'cheerio'
 import fs from 'fs'
 import puppeteer from 'puppeteer'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, HTTP_FIRST, amazonUrl } from './config.js'
-import { AmazonHttpBlockedError, fetchAmazonHtml } from './http.js'
+import { tryFetchOverHttp } from './http.js'
 import { cleanText, navigate, withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
 /** Amazon returns far more results than anyone reads; the scrapers keep this many */
 const SEARCH_RESULTS_LIMIT = 20
-
-/**
- * Read a page over plain HTTP, or return null so the caller falls back to Chrome.
- *
- * `isComplete` guards against the quiet failure mode: Amazon answering 200 with a page that
- * simply does not hold the data (an interstitial, a layout we do not know). Falling back
- * costs a browser load; parsing an empty page costs a wrong answer.
- */
-async function tryFetchOverHttp(
-  url: string,
-  logTag: string,
-  isComplete: ($: cheerio.CheerioAPI) => boolean,
-  options: Parameters<typeof fetchAmazonHtml>[1] = {}
-): Promise<string | null> {
-  if (!HTTP_FIRST) return null
-
-  try {
-    const html = await fetchAmazonHtml(url, options)
-    if (isComplete(cheerio.load(html))) return html
-    console.error(`[WARN][${logTag}] HTTP response did not contain the expected content, falling back to the browser`)
-  } catch (error: any) {
-    const reason = error instanceof AmazonHttpBlockedError ? error.message : `HTTP request failed: ${error.message}`
-    console.error(`[WARN][${logTag}] ${reason}, falling back to the browser`)
-  }
-  return null
-}
 
 // ##################################
 // Product Details
@@ -75,7 +49,7 @@ export async function getProductDetails(asin: string): Promise<ProductDetails> {
     const url = amazonUrl(`/gp/product/${asin}`)
     console.error(`[INFO][get-product-details] Fetching product details from ${url}`)
 
-    const overHttp = await tryFetchOverHttp(url, 'get-product-details', $ => !!$('span#productTitle').text().trim())
+    const overHttp = await tryFetchOverHttp(url, 'get-product-details', html => !!cheerio.load(html)('span#productTitle').text().trim())
     if (overHttp) return extractProductDetailsPageData(cheerio.load(overHttp), asin)
 
     html = await withPage(async page => {
@@ -241,7 +215,7 @@ export async function searchProducts(searchTerm: string): Promise<ProductSearchR
 
     // Only the first SEARCH_RESULTS_LIMIT results are kept, and they arrive well before the
     // end of the stream - stop as soon as the next one starts, so the last kept result is complete.
-    const overHttp = await tryFetchOverHttp(url, 'search-products', $ => $('[role="listitem"]').length > 0, {
+    const overHttp = await tryFetchOverHttp(url, 'search-products', html => cheerio.load(html)('[role="listitem"]').length > 0, {
       stopWhen: partial => (partial.match(/role="listitem"/g) || []).length > SEARCH_RESULTS_LIMIT,
       checkEveryBytes: 64 * 1024,
     })

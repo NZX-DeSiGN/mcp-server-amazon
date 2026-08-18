@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio'
 import fs from 'fs'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
 import { navigate, withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
+import { tryFetchOverHttp } from './http.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
@@ -43,6 +44,9 @@ export async function getCartContent(): Promise<CartContent> {
   } else {
     const url = amazonUrl(`/gp/cart/view.html?ref_=nav_cart`)
     console.error(`[INFO][get-cart-content] Fetching cart content from ${url}`)
+
+    const overHttp = await tryFetchOverHttp(url, 'get-cart-content', page => page.includes('sc-active-cart'))
+    if (overHttp) return extractCartPageData(cheerio.load(overHttp))
 
     html = await withPage(async page => {
       // Navigate to the cart page
