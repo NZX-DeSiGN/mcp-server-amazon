@@ -1,6 +1,6 @@
 import fs from 'fs'
 import puppeteer from 'puppeteer'
-import { COOKIES_FILE_PATH, AMAZON_COOKIES, IS_BROWSER_VISIBLE, REUSE_BROWSER, BROWSER_IDLE_TIMEOUT_MS } from './config.js'
+import { COOKIES_FILE_PATH, AMAZON_COOKIES, IS_BROWSER_VISIBLE, REUSE_BROWSER, BROWSER_IDLE_TIMEOUT_MS, BLOCK_ASSETS } from './config.js'
 
 /** Get the current timestamp like "2024-06-06_15-30-45" */
 export function getTimestamp() {
@@ -134,7 +134,7 @@ export async function closeSharedBrowser(): Promise<void> {
  * Run `fn` with a fresh page on the shared browser, then close the page (not the browser).
  * Always use this rather than launching Chrome directly, so the reuse accounting stays correct.
  */
-export async function withPage<T>(fn: (page: puppeteer.Page) => Promise<T>): Promise<T> {
+export async function withPage<T>(fn: (page: puppeteer.Page) => Promise<T>, options: WithPageOptions = {}): Promise<T> {
   cancelIdleClose()
   pagesInUse++
 
@@ -142,7 +142,7 @@ export async function withPage<T>(fn: (page: puppeteer.Page) => Promise<T>): Pro
   try {
     const browser = await acquireBrowser()
     page = await browser.newPage()
-    await preparePage(page)
+    await preparePage(page, options)
     return await fn(page)
   } finally {
     if (page) await page.close().catch(() => {})
@@ -151,7 +151,32 @@ export async function withPage<T>(fn: (page: puppeteer.Page) => Promise<T>): Pro
   }
 }
 
-async function preparePage(page: puppeteer.Page): Promise<void> {
+export interface WithPageOptions {
+  /**
+   * Set for flows that click Amazon's widgets: nothing is blocked, so the page renders and
+   * behaves like a real one. Scraping flows leave it off and skip the useless bytes.
+   */
+  interactive?: boolean
+}
+
+/** Resource kinds a scraper never reads - the HTML is all cheerio ever sees */
+const BLOCKED_RESOURCE_TYPES = new Set(['image', 'media', 'font', 'stylesheet'])
+
+/** Ad, beacon and metrics endpoints; blocking them also stops them from delaying the page */
+const BLOCKED_HOSTS = /unagi\.|fls-na|fls-eu|adsystem|advertising\.amazon|csm\/showads|paets\.advertising|\/x\/px\?/
+
+async function preparePage(page: puppeteer.Page, options: WithPageOptions): Promise<void> {
+  if (BLOCK_ASSETS && !options.interactive) {
+    await page.setRequestInterception(true)
+    page.on('request', request => {
+      if (BLOCKED_RESOURCE_TYPES.has(request.resourceType()) || BLOCKED_HOSTS.test(request.url())) {
+        void request.abort().catch(() => {})
+        return
+      }
+      void request.continue().catch(() => {})
+    })
+  }
+
   // Remove automation indicators
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, 'webdriver', {

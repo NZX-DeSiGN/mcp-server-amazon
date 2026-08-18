@@ -38,6 +38,14 @@ export const REUSE_BROWSER = envFlag('BROWSER_REUSE', true)
  */
 export const BROWSER_IDLE_TIMEOUT_MS = envInt('BROWSER_IDLE_TIMEOUT_MS', 3 * 60 * 1000)
 
+/**
+ * Drop the requests a scraper never reads - images, stylesheets, fonts, media, ad and
+ * telemetry hosts - env: BLOCK_ASSETS
+ * Disabled automatically for the flows that click Amazon's widgets, which need a page
+ * that renders like a real one.
+ */
+export const BLOCK_ASSETS = envFlag('BLOCK_ASSETS', true)
+
 export const COOKIES_FILE_PATH = process.env.AMAZON_COOKIES_FILE || `${__dirname}/../amazonCookies.json`
 
 /**

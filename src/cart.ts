@@ -5,6 +5,9 @@ import { navigate, withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js
 
 const __dirname = new URL('.', import.meta.url).pathname
 
+/** Clicking Amazon's cart widgets needs a page that renders and behaves like a real one */
+const INTERACTIVE = { interactive: true }
+
 // ##################################
 // Cart Content Types
 // ##################################
@@ -214,7 +217,7 @@ export async function addToCart(asin: string): Promise<{ success: boolean; messa
     } catch (error) {
       throw new Error(`Could not verify that the product was added to cart: ${error}`)
     }
-  })
+  }, INTERACTIVE)
 }
 
 // ##################################
@@ -285,7 +288,7 @@ export async function clearCart() {
         message: `Successfully cleared cart. Removed ${itemsRemoved} items.`,
         itemsRemoved,
       }
-    })
+    }, INTERACTIVE)
   } catch (error: any) {
     console.error('[ERROR][clear-cart] Error clearing cart:', error)
     throw new Error(`Failed to clear cart: ${error.message}`)
@@ -360,7 +363,7 @@ export async function removeFromCart(asin: string): Promise<{ success: boolean; 
         message: `Successfully removed item ${asin} from cart.`,
         itemsRemoved: 1,
       }
-    })
+    }, INTERACTIVE)
   } catch (error: any) {
     console.error('[ERROR][remove-from-cart] Error removing item:', error)
     throw new Error(`Failed to remove item from cart: ${error.message}`)
