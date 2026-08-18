@@ -24,9 +24,12 @@ npm run clean
 ### Core Components
 
 - **MCP Server** (`src/index.ts`): Defines and exposes tools via the MCP protocol
-- **Amazon Scraper** (`src/amazon.ts`): Contains all Amazon interaction logic using Puppeteer and Cheerio
-- **Configuration** (`src/config.ts`): Manages server settings and paths
-- **Browser Utils** (`src/utils.ts`): Helper functions for Puppeteer browser automation
+- **Products** (`src/products.ts`): Product search and product details scraping
+- **Reviews** (`src/reviews.ts`): Customer reviews, rating summary and star breakdown
+- **Cart** (`src/cart.ts`): Cart content, add, remove one item, clear
+- **Orders** (`src/orders.ts`): Orders history
+- **Configuration** (`src/config.ts`): Env-driven settings, marketplace/locale, `amazonUrl()`
+- **Browser Utils** (`src/utils.ts`): Puppeteer helpers, login detection, text normalisation
 
 ### Key Dependencies
 
@@ -37,10 +40,22 @@ npm run clean
 
 ### Authentication
 
-The server requires Amazon cookies for authentication:
-1. Export cookies from browser using a cookie export extension
-2. Save to `amazonCookies.json` in project root
+Most tools need Amazon cookies:
+1. Export cookies from browser using a cookie export extension, or run
+   `AMAZON_DOMAIN=amazon.fr AMAZON_EMAIL=... AMAZON_PASSWORD=... node login_and_save_cookies.cjs`
+2. Save to `amazonCookies.json` in project root (gitignored)
 3. Format: Array of cookie objects with standard properties
+
+A missing cookie file is not fatal: the server starts and scrapes anonymously.
+Session-gated pages throw through `throwIfNotLoggedIn()`, which detects Amazon's
+`/ap/signin` redirect - not just the classic `#ap_email` form.
+
+### Configuration
+
+Everything is env-driven (`src/config.ts`): `AMAZON_DOMAIN`, `AMAZON_LOCALE`,
+`AMAZON_COOKIES_FILE`, `USE_MOCK_RESPONSES`, `EXPORT_MOCKS`, `BROWSER_VISIBLE`.
+Build URLs with `amazonUrl('/gp/product/<asin>')` rather than hardcoding a domain
+or the `/-/en/` language segment.
 
 ## Important Implementation Details
 
@@ -54,9 +69,19 @@ The server requires Amazon cookies for authentication:
 - Implements retry logic for network failures
 - Provides detailed error messages for debugging
 
+### Scraping notes
+- Amazon serves two markups for reviews: the product page uses `reviewTitle` /
+  `reviewRichContentContainer`, the reviews page the classic `review-title` /
+  `review-body`. Match `[data-hook="review"]` without a tag prefix - the container
+  is not always a `<div>`.
+- Many nodes hold both the desktop and the mobile copy of a string, yielding
+  "4.2  4.2". Normalise with `cleanText()` from `src/utils.ts`.
+- Text-based branching (empty cart, add-to-cart confirmation, return eligibility)
+  must accept the French wording as well as the English one.
+
 ### Mock Mode
 - Set `USE_MOCK_RESPONSES=true` in environment to use mock HTML files
-- Mock files stored in `mock/` directory
+- Mock files stored in `mocks/` directory
 - Useful for development and testing without hitting Amazon
 
 ### Logging
@@ -72,11 +97,16 @@ The server requires Amazon cookies for authentication:
 5. `add-to-cart`: Add items to cart
 6. `remove-from-cart`: Remove a single item from the cart by ASIN (leaves other items untouched)
 7. `clear-cart`: Remove all items from cart
-8. `perform-purchase`: Complete purchase (mock mode only)
+8. `get-product-reviews`: Read customer reviews, rating summary and star breakdown
+   (star filter, sort, verified-only; falls back to the public product-page reviews
+   when not logged in)
+9. `perform-purchase`: Complete purchase (mock mode only)
 
 ## Testing Approach
 
 No formal test suite exists. Testing is done through:
+- `src/amazon.*.test.ts` scripts, run directly after `npm run build`
+  (e.g. `node build/amazon.getProductReviews.test.js`)
 - Manual testing with Claude Desktop
 - Mock mode for development
 - Log analysis for debugging
