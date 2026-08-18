@@ -1,7 +1,7 @@
 import * as cheerio from 'cheerio'
 import fs from 'fs'
 import puppeteer from 'puppeteer'
-import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, getAmazonDomain } from './config.js'
+import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
 import { createBrowserAndPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
@@ -17,8 +17,7 @@ export async function getOrdersHistory() {
     const mockPath = `${__dirname}/../mocks/getOrdersHistory.html`
     html = fs.readFileSync(mockPath, 'utf-8')
   } else {
-    const domain = getAmazonDomain()
-    const url = `https://www.${domain}/-/en/gp/css/order-history`
+    const url = amazonUrl(`/gp/css/order-history`)
     console.error(`[INFO][get-orders-history] Fetching orders history from ${url}`)
 
     const { browser, page } = await createBrowserAndPage()

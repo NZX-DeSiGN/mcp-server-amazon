@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio'
 import fs from 'fs'
-import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, getAmazonDomain } from './config.js'
+import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
 import { createBrowserAndPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
@@ -38,8 +38,7 @@ export async function getCartContent(): Promise<CartContent> {
     const mockPath = `${__dirname}/../mocks/getCartContent.html`
     html = fs.readFileSync(mockPath, 'utf-8')
   } else {
-    const domain = getAmazonDomain()
-    const url = `https://www.${domain}/-/en/gp/cart/view.html?ref_=nav_cart`
+    const url = amazonUrl(`/gp/cart/view.html?ref_=nav_cart`)
     console.error(`[INFO][get-cart-content] Fetching cart content from ${url}`)
 
     const { browser, page } = await createBrowserAndPage()
@@ -151,8 +150,7 @@ export async function addToCart(asin: string): Promise<{ success: boolean; messa
     throw new Error('Invalid ASIN provided. ASIN should be a 10-character string.')
   }
 
-  const domain = getAmazonDomain()
-  const url = `https://www.${domain}/-/en/gp/product/${asin}`
+  const url = amazonUrl(`/gp/product/${asin}`)
   console.error(`[INFO][add-to-cart] Adding product ${asin} to cart from ${url}`)
 
   const { browser, page } = await createBrowserAndPage()
@@ -230,8 +228,7 @@ export async function addToCart(asin: string): Promise<{ success: boolean; messa
 // ##################################
 
 export async function clearCart() {
-  const domain = getAmazonDomain()
-  const url = `https://www.${domain}/-/en/gp/cart/view.html`
+  const url = amazonUrl(`/gp/cart/view.html`)
   console.error(`[INFO][clear-cart] Clearing cart at ${url}`)
 
   const { browser, page } = await createBrowserAndPage()
@@ -312,8 +309,7 @@ export async function removeFromCart(asin: string): Promise<{ success: boolean; 
     throw new Error('Invalid ASIN provided. ASIN should be a 10-character string.')
   }
 
-  const domain = getAmazonDomain()
-  const url = `https://www.${domain}/-/en/gp/cart/view.html`
+  const url = amazonUrl(`/gp/cart/view.html`)
   console.error(`[INFO][remove-from-cart] Removing product ${asin} from cart at ${url}`)
 
   const { browser, page } = await createBrowserAndPage()

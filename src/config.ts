@@ -23,9 +23,20 @@ export const EXPORT_LIVE_SCRAPING_FOR_MOCKS = envFlag('EXPORT_MOCKS', false)
 export const COOKIES_FILE_PATH = process.env.AMAZON_COOKIES_FILE || `${__dirname}/../amazonCookies.json`
 
 /**
+ * Language segment injected in every Amazon URL (`https://www.amazon.fr/-/en/...`).
+ * Defaults to `en` because several scrapers match on English page text
+ * ("Added to cart", "Your Amazon Cart is empty", ...). French is supported too.
+ * Set to an empty string to use the marketplace default language.
+ * env: AMAZON_LOCALE (e.g. `en`, `fr`, or empty)
+ */
+export const AMAZON_LOCALE = process.env.AMAZON_LOCALE ?? 'en'
+
+/**
  * Go to the Amazon website and log in to your account
  * Then export cookies as JSON using a browser extension like "Cookie-Editor"
  * and paste them in [amazonCookies.json](../amazonCookies.json)
+ *
+ * Alternatively, run `AMAZON_DOMAIN=amazon.fr node login_and_save_cookies.cjs`.
  *
  * @see https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm?hl=fr
  */
@@ -43,49 +54,45 @@ export const AMAZON_COOKIES: {
   value: string
 }[] = loadAmazonCookiesFile()
 
+/** Resolved once - `getAmazonDomain()` used to re-log the same line on every call */
+let cachedDomain: string | undefined
+
 /**
- * Extract the Amazon domain from cookies
- * Returns the domain without the leading dot (e.g., "amazon.com", "amazon.co.uk", "amazon.de")
+ * Extract the Amazon domain from cookies, unless `AMAZON_DOMAIN` forces it.
+ * Returns the domain without the leading dot (e.g. "amazon.com", "amazon.fr", "amazon.de")
  */
 export function getAmazonDomain(): string {
+  if (cachedDomain) return cachedDomain
+  cachedDomain = resolveAmazonDomain()
+  console.error(`[INFO] Using Amazon domain: ${cachedDomain}`)
+  return cachedDomain
+}
+
+function resolveAmazonDomain(): string {
+  if (process.env.AMAZON_DOMAIN) return process.env.AMAZON_DOMAIN.replace(/^\.?(www\.)?/, '')
+
   if (!AMAZON_COOKIES || AMAZON_COOKIES.length === 0) {
     console.error('[WARN] No cookies found, using default amazon.com domain')
     return 'amazon.com'
   }
 
   // Find a cookie with domain starting with ".amazon."
-  const amazonCookie = AMAZON_COOKIES.find(cookie => 
-    cookie.domain && cookie.domain.startsWith('.amazon.')
-  )
+  const amazonCookie = AMAZON_COOKIES.find(cookie => cookie.domain && cookie.domain.startsWith('.amazon.'))
+  if (amazonCookie) return amazonCookie.domain.replace(/^\./, '')
 
-  if (amazonCookie) {
-    // Remove the leading dot from domain
-    const domain = amazonCookie.domain.startsWith('.') 
-      ? amazonCookie.domain.substring(1) 
-      : amazonCookie.domain
-    console.error(`[INFO] Detected Amazon domain from cookies: ${domain}`)
-    return domain
-  }
-
-  // Fallback: try to find any cookie with "amazon" in the domain
-  const fallbackCookie = AMAZON_COOKIES.find(cookie => 
-    cookie.domain && cookie.domain.includes('amazon')
-  )
-
-  if (fallbackCookie) {
-    let domain = fallbackCookie.domain
-    // Remove leading dot if present
-    if (domain.startsWith('.')) {
-      domain = domain.substring(1)
-    }
-    // If it's a subdomain like "www.amazon.com", extract the main domain
-    if (domain.startsWith('www.')) {
-      domain = domain.substring(4)
-    }
-    console.error(`[INFO] Detected Amazon domain from cookies (fallback): ${domain}`)
-    return domain
-  }
+  // Fallback: any cookie with "amazon" in the domain
+  const fallbackCookie = AMAZON_COOKIES.find(cookie => cookie.domain && cookie.domain.includes('amazon'))
+  if (fallbackCookie) return fallbackCookie.domain.replace(/^\./, '').replace(/^www\./, '')
 
   console.error('[WARN] Could not detect Amazon domain from cookies, using default amazon.com')
   return 'amazon.com'
+}
+
+/**
+ * Build an Amazon URL for the current marketplace and locale.
+ * `amazonUrl('/gp/product/B0CYSJ9TG8')` -> `https://www.amazon.fr/-/en/gp/product/B0CYSJ9TG8`
+ */
+export function amazonUrl(path: string): string {
+  const localePrefix = AMAZON_LOCALE ? `/-/${AMAZON_LOCALE}` : ''
+  return `https://www.${getAmazonDomain()}${localePrefix}${path.startsWith('/') ? path : `/${path}`}`
 }

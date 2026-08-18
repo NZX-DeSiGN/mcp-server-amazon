@@ -1,7 +1,7 @@
 import * as cheerio from 'cheerio'
 import fs from 'fs'
 import puppeteer from 'puppeteer'
-import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, getAmazonDomain } from './config.js'
+import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
 import { createBrowserAndPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
@@ -42,8 +42,7 @@ export async function getProductDetails(asin: string): Promise<ProductDetails> {
     const mockPath = `${__dirname}/../mocks/getProductDetails.html`
     html = fs.readFileSync(mockPath, 'utf-8')
   } else {
-    const domain = getAmazonDomain()
-    const url = `https://www.${domain}/-/en/gp/product/${asin}`
+    const url = amazonUrl(`/gp/product/${asin}`)
     console.error(`[INFO][get-product-details] Fetching product details from ${url}`)
 
     const { browser, page } = await createBrowserAndPage()
@@ -207,8 +206,7 @@ export async function searchProducts(searchTerm: string): Promise<ProductSearchR
     const mockPath = `${__dirname}/../mocks/searchProducts.html`
     html = fs.readFileSync(mockPath, 'utf-8')
   } else {
-    const domain = getAmazonDomain()
-    const url = `https://www.${domain}/s?k=${encodeURIComponent(searchTerm)}`
+    const url = amazonUrl(`/s?k=${encodeURIComponent(searchTerm)}`)
     console.error(`[INFO][search-products] Searching for products with term "${searchTerm}" from ${url}`)
 
     const { browser, page } = await createBrowserAndPage()
@@ -336,8 +334,7 @@ function extractSearchResultSingleProductData($: cheerio.CheerioAPI, $item: chee
   const deliveryInfo = $item.find('div.udm-primary-delivery-message').text().trim() || undefined
 
   // Extract product URL
-  const domain = getAmazonDomain()
-  const productUrl = `https://www.${domain}/-/en/gp/product/${asin}`
+  const productUrl = amazonUrl(`/gp/product/${asin}`)
 
   return {
     asin,
