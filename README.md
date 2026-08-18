@@ -7,6 +7,7 @@ This server allows you to interact with Amazon's services using the MCP (Model C
 - **Product search**: Search for products on Amazon
 - **Product details**: Retrieve detailed information about a specific product on Amazon
 - **Customer reviews**: Read a product's reviews, rating summary and star breakdown, with star/sort/verified filters
+- **Batch lookups**: `search-products`, `get-product-details` and `get-product-reviews` accept a list as well as a single value, and fetch the items concurrently
 - **Cart management**: Add items, remove a single item, or clear your Amazon cart
 - **Ordering**: Place orders (fake for demonstration purposes)
 - **Orders history**: Retrieve your recent Amazon orders details
@@ -41,6 +42,19 @@ Build the project
 npm run build
 ```
 
+## Batch lookups
+
+The three lookup tools take either one value or a list of up to 20:
+
+```jsonc
+{ "asin": "B0CSYRPPPM" }                              // one product, response unchanged
+{ "asin": ["B0CSYRPPPM", "B0CYSJ9TG8", "B00VRMZDKC"] } // three, fetched concurrently
+```
+
+A list returns one entry per input, in order, each with either its `result` or
+its own `error` - a dead ASIN does not sink the rest of the batch. Fetching four
+products this way takes about as long as fetching one.
+
 ## Authentication
 
 Most tools need your Amazon session. Either export your cookies with a browser
@@ -74,6 +88,7 @@ All settings are environment variables, so nothing has to be edited and rebuilt:
 | `BROWSER_REUSE` | `true` | Share one Chrome across tool calls instead of launching one per call |
 | `BROWSER_IDLE_TIMEOUT_MS` | `180000` | Close the shared Chrome after this long without activity (`0` keeps it open) |
 | `BLOCK_ASSETS` | `true` | Skip images, stylesheets, fonts, ads and telemetry while scraping |
+| `BATCH_CONCURRENCY` | `4` | How many items of a batch request are fetched at once |
 | `HTTP_FIRST` | `true` | Read pages over plain HTTP and only start Chrome if Amazon refuses |
 
 `AMAZON_LOCALE` defaults to `en` because a few scrapers match on page text; both

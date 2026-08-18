@@ -60,6 +60,16 @@ or the `/-/en/` language segment.
 
 ## Important Implementation Details
 
+### Batch inputs
+- `search-products`, `get-product-details` and `get-product-reviews` accept a value
+  or an array (`oneOrMany()` in `src/index.ts`). A single value must keep returning
+  the exact single-result shape; an array returns per-input entries carrying either
+  `result` or `error`.
+- Validate ASINs with `assertValidAsin()` inside the scrapers, never in the tool
+  schema: schema-level rejection would fail a whole batch over one bad id. Length
+  alone is not a valid check - Amazon serves an unrelated product for a well-formed
+  non-ASIN id and echoes the requested id back into the markup.
+
 ### HTTP first
 - Read-only scrapers go through `tryFetchOverHttp()` (`src/http.ts`) and only fall
   back to Puppeteer when Amazon refuses. The pages are server-rendered, so plain
