@@ -293,8 +293,11 @@ function extractSearchResultSingleProductData($: cheerio.CheerioAPI, $item: chee
   // Extract title and check if sponsored
   const titleElement = $item.find('h2[aria-label]')
   const fullTitle = titleElement.attr('aria-label') || ''
-  const isSponsored = fullTitle.startsWith('Sponsored Ad – ')
-  const title = isSponsored ? fullTitle.replace('Sponsored Ad – ', '') : fullTitle
+  // The separator alternates between an en dash and a hyphen depending on the page
+  // variant, and the label is localised - matching one exact string missed most ads.
+  const sponsoredPrefix = fullTitle.match(/^(Sponsored Ad|Publicité sponsorisée|Sponsorisé|Gesponsert|Patrocinado)\s*[-\u2013\u2014:]\s*/i)
+  const isSponsored = sponsoredPrefix !== null
+  const title = isSponsored ? fullTitle.slice(sponsoredPrefix![0].length) : fullTitle
 
   // Extract brand
   const brand = $item.find('h2.a-size-mini span.a-size-base-plus.a-color-base').text().trim() || undefined
@@ -313,14 +316,26 @@ function extractSearchResultSingleProductData($: cheerio.CheerioAPI, $item: chee
   // Extract reviews
   const reviews: ProductSearchResult['reviews'] = {}
 
-  const ratingElement = $item.find('i.a-icon-star-mini span.a-icon-alt')
-  const ratingText = ratingElement.text().trim()
+  const ratingText = cleanText($item.find('i.a-icon-star-mini span.a-icon-alt, i.a-icon-star span.a-icon-alt').first().text())
   if (ratingText) {
     reviews.averageRating = ratingText
   }
 
-  const reviewCountElement = $item.find('a[aria-label*="ratings"] span.a-size-small')
-  const reviewCount = reviewCountElement.text().trim()
+  // The count used to sit in `a[aria-label*="ratings"] span.a-size-small`; Amazon
+  // reskinned that span to `a-size-mini`, so the old selector matched nothing. Read the
+  // link's aria-label ("30 ratings") and fall back to its visible "(30)" / "(9.4K)" text.
+  // Skip the star popover trigger, whose aria-label ("4.2 out of 5 stars, rating details")
+  // also contains "rating"; the count link is labelled "30 ratings" / "30 évaluations".
+  const countLabel = $item
+    .find('a[aria-label]')
+    .map((_i, el) => $(el).attr('aria-label') || '')
+    .get()
+    .find(label => /^[\d.,\u202f\u00a0\s]*\d\s*(ratings?|évaluations?|avis)\b/i.test(label))
+  // Drop the thousands separators (", " / "." / narrow no-break space) so the count is a plain number
+  const reviewCount = cleanText(countLabel?.replace(/\s*(ratings?|évaluations?|avis).*$/i, ''))
+    .replace(/[()]/g, '')
+    .replace(/[.,\u202f\u00a0\s](?=\d{3}\b)/g, '')
+    .trim()
   if (reviewCount) {
     reviews.reviewCount = reviewCount
   }
