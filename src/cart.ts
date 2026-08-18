@@ -1,7 +1,7 @@
 import * as cheerio from 'cheerio'
 import fs from 'fs'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
-import { withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
+import { navigate, withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
@@ -43,7 +43,7 @@ export async function getCartContent(): Promise<CartContent> {
 
     html = await withPage(async page => {
       // Navigate to the cart page
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 })
+      await navigate(page, url)
 
       // Handle login if needed
       await throwIfNotLoggedIn(page)
@@ -151,7 +151,7 @@ export async function addToCart(asin: string): Promise<{ success: boolean; messa
 
   return await withPage(async page => {
     // Navigate to the product page
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 })
+    await navigate(page, url, { waitUntil: 'load' })
 
     // Handle login if needed
     await throwIfNotLoggedIn(page)
@@ -228,7 +228,7 @@ export async function clearCart() {
   try {
     return await withPage(async page => {
       // Navigate to the cart page
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 })
+      await navigate(page, url, { waitUntil: 'load' })
 
       // Handle login if needed
       await throwIfNotLoggedIn(page)
@@ -307,7 +307,7 @@ export async function removeFromCart(asin: string): Promise<{ success: boolean; 
   try {
     return await withPage(async page => {
       // Navigate to the cart page
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 })
+      await navigate(page, url, { waitUntil: 'load' })
 
       // Handle login if needed
       await throwIfNotLoggedIn(page)
@@ -344,7 +344,7 @@ export async function removeFromCart(asin: string): Promise<{ success: boolean; 
 
       // Wait for the cart to update, then verify the row is gone (reload to be certain).
       await new Promise(resolve => setTimeout(resolve, 1500))
-      await page.reload({ waitUntil: 'networkidle2', timeout: 30000 })
+      await page.reload({ waitUntil: 'load', timeout: 30000 })
       const stillThere = await page.$(rowSelector)
       if (stillThere) {
         return {

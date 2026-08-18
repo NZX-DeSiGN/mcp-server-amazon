@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio'
 import fs from 'fs'
 import puppeteer from 'puppeteer'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
-import { withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
+import { navigate, withPage, getTimestamp, throwIfNotLoggedIn } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
@@ -22,7 +22,7 @@ export async function getOrdersHistory() {
 
     html = await withPage(async page => {
       // Navigate to the page
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 })
+      await navigate(page, url)
 
       // Handle login if needed
       await throwIfNotLoggedIn(page)

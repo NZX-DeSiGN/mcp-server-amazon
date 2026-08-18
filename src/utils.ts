@@ -168,6 +168,29 @@ async function preparePage(page: puppeteer.Page): Promise<void> {
   await page.setViewport({ width: 1366, height: 768 })
 }
 
+/**
+ * Navigate, then let the caller wait for the selector it actually needs.
+ *
+ * The scrapers used `networkidle2`, which waits for Amazon's ad and telemetry traffic to go
+ * quiet - 1.9s to 4.5s per page, over 90% of a request. The content is ready long before
+ * that: every scraper's waitForSelector returns in under 10ms once the DOM is parsed. So
+ * wait for `domcontentloaded` and rely on those selectors, which is what actually gates the
+ * data being present.
+ *
+ * Pass `waitUntil: 'load'` for flows that click Amazon's own widgets: those need the page's
+ * JavaScript to have booted, not just the markup to exist.
+ */
+export async function navigate(
+  page: puppeteer.Page,
+  url: string,
+  options: { waitUntil?: puppeteer.PuppeteerLifeCycleEvent; timeout?: number } = {}
+): Promise<void> {
+  await page.goto(url, {
+    waitUntil: options.waitUntil ?? 'domcontentloaded',
+    timeout: options.timeout ?? 30000,
+  })
+}
+
 // Do not leave a Chrome behind when the MCP server stops
 for (const signal of ['exit', 'SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {

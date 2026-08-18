@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio'
 import fs from 'fs'
 import puppeteer from 'puppeteer'
 import { USE_MOCKS, EXPORT_LIVE_SCRAPING_FOR_MOCKS, amazonUrl } from './config.js'
-import { cleanText, getTimestamp, isLoginPage, withPage } from './utils.js'
+import { cleanText, getTimestamp, isLoginPage, navigate, withPage } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
@@ -99,7 +99,7 @@ export async function getProductReviews(asin: string, options: GetProductReviews
   console.error(`[INFO][get-product-reviews] Fetching reviews for ${asin} from ${reviewsUrl}`)
 
   return await withPage(async page => {
-    await page.goto(reviewsUrl, { waitUntil: 'networkidle2', timeout: 30000 })
+    await navigate(page, reviewsUrl)
 
     // The full reviews list is session-gated: without valid cookies Amazon bounces to
     // /ap/signin. Rather than failing, fall back to the reviews shown on the public
@@ -147,7 +147,7 @@ async function scrapeProductPageReviews(
   opts: { starFilter: ReviewsStarFilter; sortBy: ReviewsSortBy; verifiedPurchaseOnly: boolean; maxReviews: number },
 ): Promise<ProductReviewsResult> {
   const productUrl = amazonUrl(`/gp/product/${asin}`)
-  await page.goto(productUrl, { waitUntil: 'networkidle2', timeout: 30000 })
+  await navigate(page, productUrl)
 
   // The review block sits far down the page and is rendered lazily
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
