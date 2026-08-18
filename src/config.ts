@@ -2,15 +2,26 @@ import { loadAmazonCookiesFile } from './utils.js'
 
 const __dirname = new URL('.', import.meta.url).pathname
 
-export const IS_BROWSER_VISIBLE = false
+function envFlag(name: string, defaultValue: boolean): boolean {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return defaultValue
+  return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase())
+}
 
-/** Use local mock files instead of live scraping */
-export const USE_MOCKS = false
+/** Run Chrome with a visible window (useful to debug scraping) - env: BROWSER_VISIBLE */
+export const IS_BROWSER_VISIBLE = envFlag('BROWSER_VISIBLE', false)
 
-/** Export live scraping HTML to mocks for future use */
-export const EXPORT_LIVE_SCRAPING_FOR_MOCKS = true
+/** Use local mock files instead of live scraping - env: USE_MOCK_RESPONSES */
+export const USE_MOCKS = envFlag('USE_MOCK_RESPONSES', false)
 
-export const COOKIES_FILE_PATH = `${__dirname}/../amazonCookies.json`
+/**
+ * Dump the scraped HTML into `mocks/` on every live call - env: EXPORT_MOCKS
+ * Off by default: each dump is several MB and they pile up fast.
+ */
+export const EXPORT_LIVE_SCRAPING_FOR_MOCKS = envFlag('EXPORT_MOCKS', false)
+
+export const COOKIES_FILE_PATH = process.env.AMAZON_COOKIES_FILE || `${__dirname}/../amazonCookies.json`
+
 /**
  * Go to the Amazon website and log in to your account
  * Then export cookies as JSON using a browser extension like "Cookie-Editor"
